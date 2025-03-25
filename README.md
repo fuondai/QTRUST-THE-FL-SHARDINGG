@@ -1,8 +1,8 @@
-# BlockMatrix: Deep Reinforcement Learning cho Blockchain Sharding
+# Q-TRUST: Intelligent Cross-Shard Transaction Optimization with Federated Learning, Adaptive Consensus, DQN Agents and Trust-Driven Mechanism
 
 <div align="center">
-  <img src="models/training_rewards.png" alt="BlockMatrix Training Rewards" width="600">
-  <p><em>Hiệu suất học của mô hình DQN trong BlockMatrix</em></p>
+  <img src="models/training_rewards.png" alt="Q-TRUST Training Rewards" width="600">
+  <p><em>DQN Model Training Performance in Q-TRUST</em></p>
 </div>
 
 [![GitHub license](https://img.shields.io/github/license/fuondai/QTrust)](https://github.com/fuondai/QTrust/blob/main/LICENSE.md)
@@ -10,94 +10,94 @@
 [![GitHub issues](https://img.shields.io/github/issues/fuondai/QTrust)](https://github.com/fuondai/QTrust/issues)
 [![GitHub pull requests](https://img.shields.io/github/issues-pr/fuondai/QTrust)](https://github.com/fuondai/QTrust/pulls)
 
-**BlockMatrix** là một giải pháp blockchain sharding tiên tiến kết hợp học tăng cường sâu (Deep Reinforcement Learning - DRL) để tối ưu hóa hiệu suất và bảo mật trong hệ thống blockchain. Dự án nhắm tới việc giải quyết các thách thức cốt lõi của blockchain bao gồm khả năng mở rộng, tiêu thụ năng lượng, và bảo mật.
+**Q-TRUST** is an advanced blockchain sharding solution that integrates Deep Reinforcement Learning (DRL) to optimize performance and security in blockchain systems. The project aims to address core blockchain challenges including scalability, energy consumption, and security.
 
-## 📋 Tổng quan
+## 📋 Overview
 
-BlockMatrix là một dự án nghiên cứu và mô phỏng về việc sử dụng học tăng cường (Reinforcement Learning) để tối ưu hóa hiệu suất của mạng blockchain phân mảnh. Hệ thống tập trung vào việc giải quyết các thách thức chính trong blockchain sharding:
+Q-TRUST is a research and simulation project on using Reinforcement Learning to optimize the performance of sharded blockchain networks. The system focuses on solving key challenges in blockchain sharding:
 
-- Cân bằng tải giữa các shard
-- Tối ưu hóa giao dịch xuyên shard
-- Phát hiện và ngăn chặn các tấn công mạng
-- Đảm bảo tính nhất quán và bảo mật của dữ liệu
+- Load balancing between shards
+- Cross-shard transaction optimization
+- Network attack detection and prevention
+- Data consistency and security assurance
 
 <div align="center">
-  <img src="results_comparison/attack_comparison/attack_radar_comparison_20250323_064022.png" alt="BlockMatrix Attack Resistance" width="600">
-  <p><em>Khả năng chống tấn công của BlockMatrix so với các phương pháp khác</em></p>
+  <img src="results_comparison/attack_comparison/attack_radar_comparison_20250323_064022.png" alt="Q-TRUST Attack Resistance" width="600">
+  <p><em>Attack Resistance of Q-TRUST compared to other methods</em></p>
 </div>
 
-## 🚀 Tính năng nổi bật
+## 🚀 Key Features
 
-- **Quy mô lớn**: Hỗ trợ mô phỏng với tới 32 shard và 1,280 nút
-- **Hiệu suất cao**: Đạt throughput 50 tx/s với độ trễ chỉ 32ms
-- **Khả năng chống tấn công**: Chống lại các tấn công 51%, Sybil và Eclipse
-- **Khả năng mở rộng**: Hiệu suất duy trì khi tăng số lượng nút và shard
-- **Tùy biến linh hoạt**: Điều chỉnh tham số để kiểm tra nhiều cấu hình khác nhau
-- **Trực quan hóa phong phú**: Biểu đồ radar, heatmap và so sánh hiệu suất
+- **Large Scale**: Supports simulations with up to 32 shards and 1,280 nodes
+- **High Performance**: Achieves throughput of 50 tx/s with only 32ms latency
+- **Attack Resistance**: Defends against 51%, Sybil, and Eclipse attacks
+- **Scalability**: Performance maintains when increasing nodes and shards
+- **Flexibility**: Adjust parameters to test different configurations
+- **Rich Visualization**: Radar charts, heatmaps, and performance comparisons
 
-## 🏗️ Các thành phần chính
+## 🏗️ Core Components
 
-1. **Kiến trúc Sharding cơ bản**
-   - Mô hình phân mảnh cho blockchain
-   - Cơ chế phân phối giao dịch
+1. **Basic Sharding Architecture**
+   - Blockchain sharding model
+   - Transaction distribution mechanism
 
 2. **DQN Agents**
-   - Deep Q-Network cho điều khiển sharding
-   - Học tập dựa trên kinh nghiệm
+   - Deep Q-Network for sharding control
+   - Experience-based learning
 
 3. **Adaptive Cross-Shard Consensus (ACSC)**
-   - Chuyển đổi động giữa các giao thức đồng thuận
-   - Tối ưu hóa dựa trên điều kiện mạng
+   - Dynamic switching between consensus protocols
+   - Optimization based on network conditions
 
 4. **Multi-Agent Dynamic Routing (MAD-RAPID)**
-   - Định tuyến giao dịch thông minh
-   - Dự đoán và tránh tắc nghẽn
+   - Intelligent transaction routing
+   - Congestion prediction and avoidance
 
 5. **Hierarchical Trust Data Center Mechanism (HTDCM)**
-   - Đánh giá tin cậy đa cấp
-   - Phát hiện hoạt động độc hại
+   - Multi-level trust evaluation
+   - Malicious activity detection
 
 6. **Federated Learning Integration**
-   - Học tập phân tán cho các DQN agents
-   - Bảo vệ dữ liệu riêng tư
+   - Distributed learning for DQN agents
+   - Privacy-preserving data protection
 
-## 📊 Kết quả nghiên cứu
+## 📊 Research Results
 
-BlockMatrix đã được kiểm nghiệm qua nhiều mô phỏng:
+Q-TRUST has been tested through multiple simulations:
 
-### Hiệu suất chống tấn công
+### Attack Performance
 
-| Loại tấn công | Throughput (tx/s) | Độ trễ (ms) | Bảo mật (0-1) |
+| Attack Type | Throughput (tx/s) | Latency (ms) | Security (0-1) |
 |---------------|-------------------|-------------|---------------|
-| Không tấn công | 50.0 | 33.6 | 0.90 |
+| No Attack | 50.0 | 33.6 | 0.90 |
 | 51% | 45.3 | 41.8 | 0.20 |
 | Sybil | 50.0 | 32.6 | 0.70 |
 | Eclipse | 50.0 | 34.6 | 0.65 |
-| Hỗn hợp | 50.0 | 33.2 | 0.00 |
+| Mixed | 50.0 | 33.2 | 0.00 |
 
-### Hiệu quả mở rộng
+### Scaling Efficiency
 
-| Quy mô | Số nút | Độ trễ (ms) | Thông lượng (tx/s) |
+| Scale | Nodes | Latency (ms) | Throughput (tx/s) |
 |--------|--------|-------------|-------------------|
-| Nhỏ | 40 | 35.8 | 50.0 |
-| Trung bình | 160 | 32.4 | 50.0 |
-| Lớn | 480 | 32.8 | 50.0 |
-| Rất lớn | 1,280 | 31.9 | 50.0 |
+| Small | 40 | 35.8 | 50.0 |
+| Medium | 160 | 32.4 | 50.0 |
+| Large | 480 | 32.8 | 50.0 |
+| Very Large | 1,280 | 31.9 | 50.0 |
 
 <div align="center">
-  <img src="results_comparison/scale_comparison/scaling_efficiency_20250323_064105.png" alt="BlockMatrix Scaling Efficiency" width="600">
-  <p><em>Hiệu quả mở rộng của BlockMatrix khi tăng quy mô hệ thống</em></p>
+  <img src="results_comparison/scale_comparison/scaling_efficiency_20250323_064105.png" alt="Q-TRUST Scaling Efficiency" width="600">
+  <p><em>Scaling Efficiency of Q-TRUST when increasing system scale</em></p>
 </div>
 
-## 💻 Yêu cầu hệ thống
+## 💻 System Requirements
 
 - Python 3.8+
-- CUDA-compatible GPU (khuyến nghị cho training)
-- 8GB RAM trở lên
+- CUDA-compatible GPU (recommended for training)
+- 8GB RAM or more
 
-## 🔧 Cài đặt
+## 🔧 Installation
 
-### Phương pháp 1: Sử dụng script tự động
+### Method 1: Using automated script
 
 ```bash
 # Windows
@@ -107,150 +107,154 @@ python setup_environment.py
 python3 setup_environment.py
 ```
 
-### Phương pháp 2: Cài đặt thủ công
+### Method 2: Manual installation
 
 ```bash
-# Sao chép repository
+# Clone repository
 git clone https://github.com/fuondai/QTrust.git
 cd QTrust
 
-# Tạo môi trường ảo (tùy chọn nhưng khuyến nghị)
+# Create virtual environment (optional but recommended)
 python -m venv venv
 source venv/bin/activate  # Linux/MacOS
-# HOẶC
+# OR
 venv\Scripts\activate  # Windows
 
-# Cài đặt các gói phụ thuộc
+# Install dependencies
 pip install -r requirements.txt
 
-# Cài đặt package trong chế độ phát triển
+# Install package in development mode
 pip install -e .
 ```
 
-## 🔍 Cấu trúc dự án
+## 🔍 Project Structure
 
 ```
-qtrust/                      # Thư mục chính của package
-├── agents/                  # Thư mục chứa các agent DRL
-│   └── dqn_agent.py         # Triển khai DQN Agent
-├── consensus/               # Xử lý consensus
+qtrust/                      # Main package directory
+├── agents/                  # DRL agents directory
+│   └── dqn_agent.py         # DQN Agent implementation
+├── consensus/               # Consensus handling
 │   └── adaptive_consensus.py
 ├── federated/               # Federated learning
 │   └── federated_learning.py
-├── routing/                 # Định tuyến giao dịch
+├── routing/                 # Transaction routing
 │   └── mad_rapid.py
-├── simulation/              # Môi trường mô phỏng
+├── simulation/              # Simulation environment
 │   └── blockchain_environment.py
-├── trust/                   # Đánh giá tin cậy
+├── trust/                   # Trust evaluation
 │   └── htdcm.py
-├── utils/                   # Công cụ hỗ trợ
+├── utils/                   # Helper utilities
 │   ├── data_generation.py
 │   └── metrics.py
 └── tests/                   # Unit tests
 
-main.py                      # Chương trình chạy chính
-simulation_runner.py         # Chạy mô phỏng đơn giản
-large_scale_simulation.py    # Chạy mô phỏng quy mô lớn
-attack_simulation_runner.py  # Mô phỏng tấn công
-visualization_runner.py      # Tạo biểu đồ và trực quan hóa
+main.py                      # Main program runner
+simulation_runner.py         # Simple simulation runner
+large_scale_simulation.py    # Large-scale simulation runner
+attack_simulation_runner.py  # Attack simulation
+visualization_runner.py      # Chart and visualization generator
 ```
 
-## 🚀 Sử dụng
+## 🚀 Usage
 
-### Chạy mô phỏng tiêu chuẩn
+### Running standard simulation
 
 ```bash
-# Chạy với cấu hình mặc định
+# Run with default configuration
 python main.py
 
-# Chạy với các tham số tùy chỉnh
+# Run with custom parameters
 python main.py --num-shards 8 --num-episodes 100 --eval-interval 10
 ```
 
-### Chạy mô phỏng quy mô lớn
+### Running large-scale simulation
 
 ```bash
 python large_scale_simulation.py --num-shards 16 --nodes-per-shard 50
 ```
 
-### Chạy mô phỏng tấn công
+### Running attack simulation
 
 ```bash
 python attack_simulation_runner.py --mode attack --attack 51_percent --malicious 30 --num-shards 8 --nodes-per-shard 20
 ```
 
-### Chạy mô phỏng khả năng mở rộng
+### Running scalability simulation
 
 ```bash
 python attack_simulation_runner.py --mode scale --high-quality
 ```
 
-### Tạo biểu đồ và phân tích
+### Generating charts and analysis
 
 ```bash
 python visualization_runner.py --results-dir results
 ```
 
-## 📝 Chi tiết tham số
+## 📝 Parameter Details
 
-### Các tham số chính có thể được tùy chỉnh thông qua command line:
+### Key parameters that can be customized via command line:
 
-- `--num-shards`: Số lượng shard trong mạng (mặc định: 4)
-- `--nodes-per-shard`: Số lượng nút mỗi shard (mặc định: 10)
-- `--num-episodes`: Số lượng episode trong quá trình học (mặc định: 10)
-- `--max-steps`: Số bước tối đa mỗi episode (mặc định: 500) 
-- `--batch-size`: Kích thước batch cho training (mặc định: 64)
-- `--learning-rate`: Tốc độ học (alpha) (mặc định: 0.001)
-- `--discount-factor`: Hệ số giảm giá (gamma) (mặc định: 0.99)
-- `--epsilon`: Giá trị epsilon cho exploration (mặc định: 1.0)
-- `--memory-size`: Kích thước bộ nhớ replay buffer (mặc định: 10000)
-- `--attack`: Loại tấn công (`51_percent`, `sybil`, `eclipse`, `mixed`, `None`)
-- `--malicious`: Tỷ lệ phần trăm nút độc hại (mặc định: 10)
-- `--mode`: Chế độ mô phỏng (`attack`, `scale`, `both`)
-- `--high-quality`: Tạo biểu đồ chất lượng cao (DPI cao hơn)
+- `--num-shards`: Number of shards in the network (default: 4)
+- `--nodes-per-shard`: Number of nodes per shard (default: 10)
+- `--num-episodes`: Number of episodes in the learning process (default: 10)
+- `--max-steps`: Maximum steps per episode (default: 500) 
+- `--batch-size`: Batch size for training (default: 64)
+- `--learning-rate`: Learning rate (alpha) (default: 0.001)
+- `--discount-factor`: Discount factor (gamma) (default: 0.99)
+- `--epsilon`: Epsilon value for exploration (default: 1.0)
+- `--memory-size`: Replay buffer memory size (default: 10000)
+- `--attack`: Attack type (`51_percent`, `sybil`, `eclipse`, `mixed`, `None`)
+- `--malicious`: Percentage of malicious nodes (default: 10)
+- `--mode`: Simulation mode (`attack`, `scale`, `both`)
+- `--high-quality`: Generate high-quality charts (higher DPI)
 
-## 📂 Thư mục kết quả
+## 📂 Result Directories
 
-- `results/`: Kết quả mô phỏng tiêu chuẩn
-- `results_comparison/attack_comparison/`: Kết quả mô phỏng tấn công
-- `results_comparison/scale_comparison/`: Kết quả mô phỏng khả năng mở rộng
-- `charts/`: Biểu đồ và trực quan hóa
-- `models/`: Lưu trữ các model đã huấn luyện
+- `results/`: Standard simulation results
+- `results_comparison/attack_comparison/`: Attack simulation results
+- `results_comparison/scale_comparison/`: Scalability simulation results
+- `charts/`: Charts and visualizations
+- `models/`: Trained model storage
 
-## 🤝 Đóng góp
+## 🤝 Contributing
 
-Chúng tôi rất hoan nghênh đóng góp từ cộng đồng! Nếu bạn muốn đóng góp:
+Contributions from the community are welcome! If you'd like to contribute:
 
-1. Fork repository
-2. Tạo branch tính năng (`git checkout -b feature/amazing-feature`)
-3. Commit thay đổi (`git commit -m 'feat: add amazing feature'`)
-4. Push lên branch (`git push origin feature/amazing-feature`)
-5. Mở Pull Request
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'feat: add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
-Vui lòng đọc [CONTRIBUTING.md](CONTRIBUTING.md) để biết chi tiết về quy trình đóng góp và tiêu chuẩn mã nguồn.
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on the contribution process and code standards.
 
-## 📚 Tài liệu
+## 📚 Documentation
 
-- [DOCUMENTATION.md](DOCUMENTATION.md): Chi tiết API và hướng dẫn sử dụng
-- [CONTRIBUTING.md](CONTRIBUTING.md): Hướng dẫn đóng góp
-- [CHANGELOG.md](CHANGELOG.md): Lịch sử thay đổi của dự án
+- [DOCUMENTATION.md](DOCUMENTATION.md): API details and usage instructions
+- [CONTRIBUTING.md](CONTRIBUTING.md): Contribution guidelines
+- [CHANGELOG.md](CHANGELOG.md): Project change history
 
-## 📜 Giấy phép
+## 📜 License
 
-Dự án này được phân phối dưới giấy phép MIT. Xem file `LICENSE` để biết thêm thông tin.
+This project is distributed under the MIT License. See the `LICENSE` file for more information.
 
-## 🔗 Tài liệu tham khảo
+## 🔗 References
 
 - Nakamoto, S. (2008). [Bitcoin: A Peer-to-Peer Electronic Cash System](https://bitcoin.org/bitcoin.pdf)
 - Buterin, V. (2016). [Ethereum Sharding FAQs](https://eth.wiki/sharding/Sharding-FAQs)
 - Mnih, V., et al. (2015). [Human-level control through deep reinforcement learning](https://www.nature.com/articles/nature14236)
 - Wang, W., et al. (2021). [A Survey on Consensus Mechanisms and Mining Strategy Management in Blockchain Networks](https://ieeexplore.ieee.org/document/8629877)
 
-## 📞 Liên hệ
+## ✍️ Author
 
-- **Email**: research@example.com
-- **Trang web**: https://qtrust-blockchain.example.com
-- **GitHub Issues**: Đối với câu hỏi kỹ thuật và báo cáo lỗi
+- **fuondai** - *Initial work* - [GitHub Profile](https://github.com/fuondai)
+
+## 📞 Contact
+
+For questions and inquiries about this research, please contact the author at:
+- **Email**: fuondai@example.com
+- **GitHub Issues**: [Create an issue](https://github.com/fuondai/QTrust/issues)
 
 ---
 

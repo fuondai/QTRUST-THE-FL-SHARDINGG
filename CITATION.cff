@@ -1,12 +1,12 @@
 cff-version: 1.2.0
-message: "Nếu bạn sử dụng phần mềm này trong nghiên cứu, vui lòng trích dẫn nó như dưới đây."
-title: "QTrust: Deep Reinforcement Learning cho Blockchain Sharding"
+message: "If you use this software in your research, please cite it as below."
+title: "Q-TRUST: Intelligent Cross-Shard Transaction Optimization with Federated Learning, Adaptive Consensus, DQN Agents and Trust-Driven Mechanism"
 authors:
-  - family-names: "QTrust Team"
+  - family-names: "fuondai"
 version: 1.0.0
 date-released: 2025-03-23
-url: "https://github.com/username/qtrust"
-repository-code: "https://github.com/username/qtrust"
+url: "https://github.com/fuondai/QTrust"
+repository-code: "https://github.com/fuondai/QTrust"
 license: MIT
 keywords:
   - blockchain
@@ -16,12 +16,12 @@ keywords:
   - federated-learning
   - trust-assessment
 abstract: >
-  QTrust là một framework mô phỏng và tối ưu hóa cho blockchain sharding sử dụng kỹ thuật
-  Deep Reinforcement Learning. Hệ thống kết hợp adaptive consensus, mạng định tuyến 
-  thông minh MAD-RAPID, cơ chế đánh giá tin cậy phân cấp (HTDCM), và tích hợp
-  Federated Learning để tối ưu hóa toàn diện hiệu suất mạng blockchain. QTrust cải thiện 
-  đáng kể hiệu suất so với các phương pháp truyền thống, đặc biệt là trong khả năng chống 
-  tấn công, độ trễ, và khả năng mở rộng.
+  Q-TRUST is a simulation and optimization framework for blockchain sharding using 
+  Deep Reinforcement Learning techniques. The system combines adaptive consensus, 
+  intelligent MAD-RAPID routing network, hierarchical trust data center mechanism (HTDCM), 
+  and Federated Learning integration to comprehensively optimize blockchain network performance. 
+  Q-TRUST significantly improves performance compared to traditional methods, particularly 
+  in attack resistance, latency, and scalability.
 references:
   - type: article
     authors:

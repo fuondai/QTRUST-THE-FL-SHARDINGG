@@ -1,98 +1,98 @@
 # Changelog
 
-Tất cả những thay đổi đáng chú ý trong dự án QTrust sẽ được ghi lại trong file này.
+All notable changes to the Q-TRUST project will be documented in this file.
 
-Định dạng dựa trên [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-và dự án tuân thủ [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Thêm mới
-- Bổ sung các biểu đồ so sánh mới trong trang README
-- Cập nhật tài liệu API trong DOCUMENTATION.md
-- Mở rộng hướng dẫn đóng góp trong CONTRIBUTING.md
+### Added
+- New comparison charts in README
+- Updated API documentation in DOCUMENTATION.md
+- Expanded contribution guidelines in CONTRIBUTING.md
 
-### Sửa đổi
-- Nâng cấp thuật toán phát hiện tấn công Eclipse
-- Cải thiện độ chính xác của módun dự đoán tắc nghẽn
+### Changed
+- Upgraded Eclipse attack detection algorithm
+- Improved accuracy of congestion prediction module
 
 ## [1.0.0] - 2025-03-23
 
-### Thêm mới
-- Phát hành phiên bản chính thức đầu tiên của QTrust
-- Bộ kiểm tra tấn công với các kịch bản 51%, Sybil, Eclipse và Mixed
-- Mô phỏng khả năng mở rộng với nhiều cấu hình hệ thống
-- Báo cáo và biểu đồ so sánh hiệu suất tự động
-- Tài liệu API đầy đủ và hướng dẫn sử dụng
-- Kiểm tra đơn vị toàn diện cho tất cả các module
+### Added
+- First official release of Q-TRUST
+- Attack simulator with 51%, Sybil, Eclipse, and Mixed scenarios
+- Scalability simulations with various system configurations
+- Automated performance reports and comparison charts
+- Complete API documentation and usage guides
+- Comprehensive unit tests for all modules
 
-### Sửa đổi
-- Cải thiện đáng kể hiệu suất DQN Agent
-- Tối ưu hóa thuật toán định tuyến MAD-RAPID
-- Giảm thiểu tài nguyên cần thiết cho mô phỏng quy mô lớn
+### Changed
+- Significantly improved DQN Agent performance
+- Optimized MAD-RAPID routing algorithm
+- Reduced resource requirements for large-scale simulations
 
-### Sửa lỗi
-- Khắc phục sự cố đồng bộ hóa dữ liệu trong học tập liên hợp
-- Sửa lỗi tràn bộ nhớ trong các mô phỏng dài hạn
-- Giải quyết lỗi trong phát hiện nút độc hại khi tỷ lệ nút độc hại cao
+### Fixed
+- Fixed data synchronization issues in federated learning
+- Fixed memory leak in long-running simulations
+- Resolved bug in malicious node detection at high malicious node ratios
 
 ## [0.9.0] - 2025-03-15
 
-### Thêm mới
-- Thêm cơ chế HTDCM (Hierarchical Trust Data Center Mechanism)
-- Tích hợp đầy đủ Federated Learning cho các Agent
-- Thêm chế độ mô phỏng tấn công
-- Thêm công cụ phân tích hiệu suất tự động
-- Script thiết lập và cài đặt đơn giản hóa
+### Added
+- Added HTDCM (Hierarchical Trust Data Center Mechanism)
+- Fully integrated Federated Learning for Agents
+- Added attack simulation mode
+- Added automated performance analysis tools
+- Simplified setup and installation scripts
 
-### Sửa đổi
-- Cải thiện cơ chế phần thưởng của DQN Agent
-- Cập nhật thuật toán Adaptive Consensus để hỗ trợ nhiều giao thức hơn
-- Tái cấu trúc pipeline dữ liệu để tăng hiệu suất
+### Changed
+- Improved reward mechanism for DQN Agent
+- Updated Adaptive Consensus algorithm to support more protocols
+- Restructured data pipeline for better performance
 
-### Sửa lỗi
-- Sửa lỗi trong cơ chế định tuyến trên các mạng lớn
-- Khắc phục vấn đề với việc lưu trữ mô hình và tải lại
+### Fixed
+- Fixed routing issues in large networks
+- Resolved model saving and loading problems
 
 ## [0.8.0] - 2025-03-01
 
-### Thêm mới
-- Thêm router MAD-RAPID cho định tuyến xuyên shard
-- Thêm visualizer cho kết quả mô phỏng
-- Tích hợp công cụ tracking thử nghiệm
-- Thêm các chế độ mô phỏng cho các kịch bản khác nhau
-- Chuẩn bị hệ thống Docker cho triển khai dễ dàng
+### Added
+- Added MAD-RAPID router for cross-shard routing
+- Added visualizer for simulation results
+- Integrated experiment tracking tools
+- Added simulation modes for different scenarios
+- Prepared Docker system for easy deployment
 
-### Sửa đổi
-- Cải thiện cấu trúc dự án theo mô hình module hóa
-- Tối ưu hóa hiệu suất của các mô phỏng quy mô lớn
-- Cập nhật thuật toán DQN với các cải tiến hiện đại
+### Changed
+- Improved project structure using modular approach
+- Optimized performance of large-scale simulations
+- Updated DQN algorithm with modern improvements
 
-### Sửa lỗi
-- Giải quyết vấn đề với việc lưu và tải các mô hình đã huấn luyện
-- Sửa lỗi trong cơ chế thưởng cho các hành động đồng thuận
+### Fixed
+- Resolved issues with saving and loading trained models
+- Fixed bug in reward mechanism for consensus actions
 
 ## [0.7.0] - 2025-02-15
 
-### Thêm mới
-- Tạo môi trường blockchain sharding cơ bản
-- Triển khai DQN Agent đầu tiên
-- Cài đặt Adaptive Consensus Protocol
-- Xây dựng framework mô phỏng cơ bản
-- Tích hợp metrics theo dõi hiệu suất
+### Added
+- Created basic blockchain sharding environment
+- Implemented first DQN Agent
+- Installed Adaptive Consensus Protocol
+- Built basic simulation framework
+- Integrated performance tracking metrics
 
-### Sửa đổi
-- Điều chỉnh cấu hình đồng thuận để cải thiện hiệu suất
-- Tối ưu hóa kiến trúc DQN cho bài toán sharding
+### Changed
+- Adjusted consensus configuration to improve performance
+- Optimized DQN architecture for sharding problem
 
 ## [0.1.0] - 2025-01-15
 
-### Thêm mới
-- Khởi tạo dự án
-- Thiết lập cấu trúc cơ bản của dự án
-- Tạo tài liệu và README cơ bản
-- Xác định kiến trúc hệ thống và module
-- Thiết lập quy trình phát triển và CI/CD
+### Added
+- Project initialization
+- Set up basic project structure
+- Created basic documentation and README
+- Defined system architecture and modules
+- Established development process and CI/CD
 
 [Unreleased]: https://github.com/username/qtrust/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/username/qtrust/compare/v0.9.0...v1.0.0

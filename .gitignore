@@ -86,3 +86,4 @@ _docs_html/
 # Local configuration
 config.local.yaml
 .env.local 
+.cursorrules

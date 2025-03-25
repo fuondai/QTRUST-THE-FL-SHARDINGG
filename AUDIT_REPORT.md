@@ -1,141 +1,141 @@
-# Báo cáo Kiểm tra QTrust
+# Q-TRUST Audit Report
 
 <div align="center">
   <img src="models/training_metrics.png" alt="QTrust Performance Metrics" width="600">
-  <p><i>Biểu đồ hiệu suất QTrust sau các cải tiến</i></p>
+  <p><i>Q-TRUST performance charts after improvements</i></p>
 </div>
 
-## Tổng quan
+## Overview
 
-Báo cáo này trình bày kết quả kiểm tra toàn diện dự án QTrust, bao gồm phân tích mã nguồn, xác định vấn đề, đánh giá bảo mật và các cải tiến đã thực hiện. Đánh giá được thực hiện bởi đội ngũ chuyên gia độc lập vào tháng 3/2025.
+This report presents the results of a comprehensive audit of the Q-TRUST project, including code analysis, issue identification, security assessment, and implemented improvements. The evaluation was conducted by an independent team of experts in March 2025.
 
-## Vấn đề đã phát hiện
+## Identified Issues
 
-### 1. Xung đột phụ thuộc
+### 1. Dependency Conflicts
 
-**Mô tả**: Có xung đột phiên bản giữa thư viện `tensorflow-federated` và `jaxlib` trong `requirements.txt`.
+**Description**: Version conflict between `tensorflow-federated` and `jaxlib` libraries in `requirements.txt`.
 
-**Mức độ nghiêm trọng**: Cao - Ngăn cản cài đặt và chạy dự án.
+**Severity**: High - Prevents installation and running of the project.
 
-**Giải pháp đã thực hiện**:
-- Cập nhật `requirements.txt` để chỉ định rõ phiên bản: `tensorflow-federated==0.20.0` 
-- Thêm phụ thuộc rõ ràng: `jaxlib~=0.1.76`
-- Đồng bộ hóa phụ thuộc giữa `requirements.txt` và `setup.py`
+**Implemented Solution**:
+- Updated `requirements.txt` to specify precise versions: `tensorflow-federated==0.20.0` 
+- Added explicit dependency: `jaxlib~=0.1.76`
+- Synchronized dependencies between `requirements.txt` and `setup.py`
 
-### 2. Không nhất quán trong kiến trúc DQNAgent
+### 2. Inconsistency in DQNAgent Architecture
 
-**Mô tả**: Có sự không nhất quán giữa định nghĩa lớp `QNetwork` và cách nó được sử dụng trong `DQNAgent`.
+**Description**: Inconsistency between the `QNetwork` class definition and how it's used in `DQNAgent`.
 
-**Mức độ nghiêm trọng**: Trung bình - Gây lỗi khi chạy.
+**Severity**: Medium - Causes runtime errors.
 
-**Giải pháp đã thực hiện**:
-- Cập nhật tham số đầu vào cho `QNetwork` trong `DQNAgent.__init__` để truyền `hidden_sizes`
-- Đảm bảo tính nhất quán trong kết nối các lớp mạng nơ-ron
+**Implemented Solution**:
+- Updated input parameters for `QNetwork` in `DQNAgent.__init__` to pass `hidden_sizes`
+- Ensured consistency in neural network layer connections
 
-### 3. Các bài kiểm tra không tương thích
+### 3. Incompatible Tests
 
-**Mô tả**: Các bài kiểm tra (tests) không phù hợp với cài đặt hiện tại của các lớp.
+**Description**: Tests not compatible with current class implementations.
 
-**Mức độ nghiêm trọng**: Trung bình - Các bài kiểm tra không chạy được.
+**Severity**: Medium - Tests fail to run.
 
-**Giải pháp đã thực hiện**:
-- Cập nhật toàn bộ `test_dqn_agent.py` để phù hợp với triển khai DQNAgent và QNetwork mới
-- Sửa các phương thức kiểm thử để phản ánh đúng hành vi kỳ vọng
+**Implemented Solution**:
+- Updated entire `test_dqn_agent.py` to match new DQNAgent and QNetwork implementations
+- Fixed test methods to reflect expected behavior correctly
 
-### 4. Thiếu tài liệu API và hướng dẫn đóng góp
+### 4. Lacking API Documentation and Contribution Guidelines
 
-**Mô tả**: Dự án thiếu tài liệu API và hướng dẫn cho người đóng góp.
+**Description**: Project lacked API documentation and guidelines for contributors.
 
-**Mức độ nghiêm trọng**: Thấp - Không ảnh hưởng đến chức năng nhưng làm giảm khả năng bảo trì.
+**Severity**: Low - Doesn't affect functionality but reduces maintainability.
 
-**Giải pháp đã thực hiện**:
-- Tạo tài liệu API đầy đủ trong `DOCUMENTATION.md`
-- Thêm hướng dẫn đóng góp trong `CONTRIBUTING.md`
-- Cập nhật `CHANGELOG.md` để theo dõi các thay đổi
+**Implemented Solution**:
+- Created comprehensive API documentation in `DOCUMENTATION.md`
+- Added contribution guidelines in `CONTRIBUTING.md`
+- Updated `CHANGELOG.md` to track changes
 
-### 5. Thiếu quy trình CI/CD
+### 5. Missing CI/CD Process
 
-**Mô tả**: Dự án không có quy trình tích hợp và triển khai liên tục.
+**Description**: Project lacked continuous integration and deployment process.
 
-**Mức độ nghiêm trọng**: Thấp - Không ảnh hưởng đến chức năng nhưng làm giảm hiệu quả phát triển.
+**Severity**: Low - Doesn't affect functionality but reduces development efficiency.
 
-**Giải pháp đã thực hiện**:
-- Thêm workflow CI/CD với GitHub Actions trong `.github/workflows/ci.yml`
-- Tạo các công việc test, lint và build
+**Implemented Solution**:
+- Added CI/CD workflow with GitHub Actions in `.github/workflows/ci.yml`
+- Created test, lint, and build jobs
 
-## Đánh giá bảo mật
+## Security Assessment
 
-Chúng tôi đã thực hiện đánh giá bảo mật toàn diện cho hệ thống QTrust, tập trung vào cả lý thuyết và triển khai.
+We conducted a comprehensive security assessment of the Q-TRUST system, focusing on both theoretical and implementation aspects.
 
-### 1. Phân tích sức đề kháng với các mô hình tấn công
+### 1. Attack Resistance Analysis
 
-| Loại tấn công | Mức độ bảo vệ | Phát hiện hiện tại | Phương pháp giảm thiểu |
+| Attack Type | Protection Level | Current Detection | Mitigation Method |
 |---------------|--------------|-------------------|------------------------|
-| 51% Attack | Cao (85%) | Phát hiện chính xác trong 92% trường hợp | HTDCM + Robust BFT Protocol |
-| Sybil Attack | Trung bình (76%) | Phát hiện trong 85% trường hợp | Trust scoring + Reputation mechanism |
-| Eclipse Attack | Cao (83%) | Phát hiện trong 88% trường hợp | MAD-RAPID routing + Trust scoring |
-| Mixed Attack | Trung bình (72%) | Phát hiện trong 78% trường hợp | Kết hợp các phương pháp trên |
+| 51% Attack | High (85%) | Accurate detection in 92% of cases | HTDCM + Robust BFT Protocol |
+| Sybil Attack | Medium (76%) | Detection in 85% of cases | Trust scoring + Reputation mechanism |
+| Eclipse Attack | High (83%) | Detection in 88% of cases | MAD-RAPID routing + Trust scoring |
+| Mixed Attack | Medium (72%) | Detection in 78% of cases | Combination of above methods |
 
-### 2. Xác định lỗ hổng
+### 2. Vulnerability Identification
 
-**Lỗ hổng phân phối nút**:
-- Mô tả: Phân phối nút không đồng đều giữa các shard có thể dẫn đến khả năng tấn công ở các shard nhỏ hơn
-- Mức độ nghiêm trọng: Trung bình
-- Giải pháp: Cài đặt thuật toán cân bằng shard trong `qtrust/simulation/blockchain_environment.py`
+**Node Distribution Vulnerability**:
+- Description: Uneven node distribution between shards can lead to attack possibility in smaller shards
+- Severity: Medium
+- Solution: Implemented shard balancing algorithm in `qtrust/simulation/blockchain_environment.py`
 
-**Lỗ hổng trong cơ chế đồng thuận**:
-- Mô tả: Fast BFT dễ bị tấn công dưới điều kiện network congestion cao
-- Mức độ nghiêm trọng: Cao
-- Giải pháp: Đã triển khai cơ chế tự động chuyển đổi sang Robust BFT khi phát hiện congestion
+**Consensus Mechanism Vulnerability**:
+- Description: Fast BFT is vulnerable under high network congestion conditions
+- Severity: High
+- Solution: Implemented automatic switching to Robust BFT when congestion is detected
 
-**Lỗ hổng giao tiếp liên hợp**:
-- Mô tả: Lỗ hổng trong giao tiếp Federated Learning
-- Mức độ nghiêm trọng: Thấp
-- Giải pháp: Đã triển khai secure aggregation để bảo vệ dữ liệu
+**Federated Communication Vulnerability**:
+- Description: Vulnerability in Federated Learning communication
+- Severity: Low
+- Solution: Implemented secure aggregation to protect data
 
-### 3. Đánh giá mã nguồn
+### 3. Code Evaluation
 
-Chúng tôi đã thực hiện phân tích tĩnh và động trên mã nguồn:
+We performed static and dynamic analysis on the codebase:
 
-**Phân tích tĩnh**:
-- 0 lỗ hổng bảo mật nghiêm trọng
-- 3 vấn đề bảo mật tiềm ẩn trong thư viện phụ thuộc
-- 2 vấn đề về xử lý đầu vào không được xác thực
+**Static Analysis**:
+- 0 critical security vulnerabilities
+- 3 potential security issues in dependent libraries
+- 2 issues related to unvalidated input handling
 
-**Phân tích động**:
-- Kiểm tra 25 kịch bản tấn công
-- Thực hiện fuzzing trên các API và giao diện dữ liệu
-- Đánh giá hiệu suất dưới các điều kiện khác nhau
+**Dynamic Analysis**:
+- Tested 25 attack scenarios
+- Performed fuzzing on APIs and data interfaces
+- Evaluated performance under various conditions
 
-## Đánh giá hiệu suất
+## Performance Evaluation
 
-Hiệu suất của QTrust đã được đánh giá trong các điều kiện khác nhau:
+Q-TRUST performance was evaluated under various conditions:
 
-### 1. Hiệu suất cơ bản
+### 1. Basic Performance
 
-| Cấu hình | Throughput (tx/s) | Latency (ms) | Energy Consumption | Security Score |
+| Configuration | Throughput (tx/s) | Latency (ms) | Energy Consumption | Security Score |
 |----------|-------------------|--------------|-------------------|----------------|
 | Baseline | 29.09 | 54.33 | 39.19 | 0.80 |
 | Adaptive Consensus | 29.09 | 48.80 | 35.01 | 0.74 |
 | DQN Routing | 29.49 | 35.57 | 39.12 | 0.80 |
-| QTrust Full | 29.37 | 32.15 | 35.00 | 0.73 |
+| Q-TRUST Full | 29.37 | 32.15 | 35.00 | 0.73 |
 
-### 2. Khả năng mở rộng
+### 2. Scalability
 
-Đánh giá mở rộng từ 4 đến 32 shards với 10-50 nút mỗi shard:
+Scaling evaluation from 4 to 32 shards with 10-50 nodes per shard:
 
-| Số lượng Shards | Hiệu suất tương đối | Overhead truyền thông | Độ trễ tăng thêm |
+| Number of Shards | Relative Performance | Communication Overhead | Additional Latency |
 |-----------------|---------------------|----------------------|-----------------|
 | 4 (baseline) | 100% | - | - |
 | 8 | 94% | +15% | +12% |
 | 16 | 87% | +28% | +25% |
 | 32 | 81% | +42% | +38% |
 
-### 3. Khả năng chống tấn công
+### 3. Attack Resistance
 
-Đánh giá dưới các kịch bản tấn công với 20% nút độc hại:
+Evaluation under attack scenarios with 20% malicious nodes:
 
-| Kịch bản tấn công | Hiệu suất giảm | Phát hiện nút độc hại | Thời gian phục hồi |
+| Attack Scenario | Performance Decrease | Malicious Node Detection | Recovery Time |
 |-------------------|----------------|----------------------|-------------------|
 | No Attack | 0% | N/A | N/A |
 | 51% Attack | -18% | 92% | 45 blocks |
@@ -143,65 +143,61 @@ Hiệu suất của QTrust đã được đánh giá trong các điều kiện k
 | Eclipse Attack | -14% | 88% | 38 blocks |
 | Mixed Attack | -25% | 78% | 60 blocks |
 
-## Cải tiến đã thực hiện
+## Implemented Improvements
 
-### 1. Quản lý phụ thuộc
+### 1. Dependency Management
 
-- Cập nhật và đồng bộ hóa các phụ thuộc trong `requirements.txt` và `setup.py`
-- Giải quyết xung đột phiên bản giữa các thư viện
-- Cụ thể hóa phiên bản cho các phụ thuộc quan trọng
+- Updated and synchronized dependencies in `requirements.txt` and `setup.py`
+- Resolved version conflicts between libraries
+- Specified versions for critical dependencies
 
-### 2. Cải thiện kiến trúc mã nguồn
+### 2. Source Code Architecture Improvements
 
-- Sửa tính nhất quán giữa QNetwork và DQNAgent
-- Cập nhật các bài kiểm tra để phù hợp với thực thi hiện tại
-- Cải thiện nhận xét và chú thích trong mã nguồn
+- Fixed consistency between QNetwork and DQNAgent
+- Updated tests to match current implementation
+- Improved comments and annotations in the code
 
-### 3. Tài liệu và hướng dẫn
+### 3. Documentation and Guidelines
 
-- Tạo tài liệu API cho toàn bộ hệ thống
-- Thêm hướng dẫn đóng góp chi tiết
-- Cập nhật changelog để theo dõi các thay đổi
+- Created API documentation for the entire system
+- Added detailed contribution guidelines
+- Updated changelog to track changes
 
-### 4. Tích hợp và triển khai
+### 4. Integration and Deployment
 
-- Thêm workflow CI/CD với GitHub Actions
-- Tạo Dockerfile và docker-compose.yml cho triển khai container
-- Cập nhật .gitignore để quản lý các file phù hợp
+- Added CI/CD workflow with GitHub Actions
+- Created Dockerfile and docker-compose.yml for container deployment
+- Updated .gitignore to manage files appropriately
 
-### 5. Tự động hóa
+### 5. Automation
 
-- Tạo script setup_environment.py để tự động cài đặt môi trường
-- Tự động hóa việc tạo thư mục và chuẩn bị môi trường
+- Created setup_environment.py script for automatic environment setup
+- Automated directory creation and environment preparation
 
-### 6. Cải tiến bảo mật
+### 6. Security Improvements
 
-- Triển khai cơ chế phát hiện tấn công nâng cao
-- Thêm cơ chế cô lập nút độc hại tự động
-- Tăng cường bảo mật trong giao tiếp liên hợp
+- Implemented advanced attack detection mechanisms
+- Added automatic malicious node isolation
+- Enhanced security in federated communication
 
-### 7. Tối ưu hóa hiệu suất
+### 7. Performance Optimization
 
-- Cải thiện thuật toán định tuyến MAD-RAPID
-- Tối ưu hóa cách chọn giao thức đồng thuận
-- Tăng tốc độ đánh giá tin cậy của nút
+- Improved MAD-RAPID routing algorithm
+- Optimized consensus protocol selection
+- Accelerated node trust evaluation
 
-## Các khuyến nghị bổ sung
+## Additional Recommendations
 
-1. **Cải thiện khả năng mở rộng**: Triển khai cơ chế phân cấp shard để cải thiện khả năng mở rộng trên quy mô lớn
-2. **Bảo mật cao cấp**: Tích hợp kỹ thuật zero-knowledge proof cho việc xác thực giao dịch
-3. **Tiết kiệm năng lượng**: Triển khai cơ chế ngủ đông cho các nút không hoạt động để giảm tiêu thụ năng lượng
-4. **Tích hợp chaincode**: Thêm hỗ trợ thực thi smart contract thông qua chaincode
-5. **Hỗ trợ đa mạng**: Mở rộng để hỗ trợ giao tiếp giữa các mạng blockchain khác nhau
+1. **Improve Scalability**: Implement hierarchical sharding mechanism to improve scalability at large scale
+2. **Advanced Security**: Integrate zero-knowledge proof techniques for transaction verification
+3. **Energy Efficiency**: Implement hibernation mechanism for inactive nodes to reduce energy consumption
+4. **Chaincode Integration**: Add support for smart contract execution through chaincode
+5. **Multi-Network Support**: Extend to support communication between different blockchain networks
 
-## Kết luận
+## Conclusion
 
-Dự án QTrust đã được cải thiện đáng kể về tính nhất quán, tài liệu, bảo mật và hiệu suất. Các xung đột phụ thuộc đã được giải quyết, kiến trúc mã nguồn đã được làm rõ ràng hơn, và các công cụ tự động hóa đã được thêm vào để đơn giản hóa việc phát triển và triển khai.
-
-Đánh giá bảo mật và hiệu suất cho thấy QTrust có khả năng chống lại các loại tấn công phổ biến với mức độ bảo vệ từ trung bình đến cao, đồng thời duy trì hiệu suất tốt ngay cả khi mở rộng quy mô hệ thống.
-
-Những cải tiến và khuyến nghị trong báo cáo này sẽ giúp dự án dễ bảo trì hơn, dễ đóng góp hơn và có khả năng mở rộng cao hơn trong tương lai.
+The Q-TRUST project has been significantly improved in terms of consistency, documentation, security, and performance. Dependency conflicts have been resolved, code architecture has been clarified, and automation tools have been added to simplify development and deployment.
 
 ---
 
-*Báo cáo này được thực hiện bởi Đội Kiểm tra Bảo mật Blockchain, Tháng 3/2025* 
+*This report was conducted by the Blockchain Security Team, March 2025* 
