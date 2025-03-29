@@ -1,0 +1,41 @@
+# Các thư mục git, cache và môi trường ảo
+.git/
+.github/
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv
+venv/
+ENV/
+env/
+venv.bak/
+.python-version
+
+# Các file tài liệu lớn đã đọc và hiểu
+# DOCUMENTATION.md đã được xóa để cho phép chỉnh sửa
+
+# Các thư mục kết quả và mô hình được tạo ra trong quá trình chạy
+results/
+results_comparison/
+charts/
+models/
+logs/
+
+# Các file IDE và thiết lập cá nhân
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Các file log, cache và dữ liệu tạm thời
+*.log
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Các file build
+build/
+dist/
+*.egg-info/

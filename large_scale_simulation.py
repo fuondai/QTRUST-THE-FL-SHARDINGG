@@ -9,6 +9,9 @@ from datetime import datetime
 from tqdm import tqdm
 import seaborn as sns
 from matplotlib.colors import LinearSegmentedColormap
+import multiprocessing
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import partial
 
 # Thêm thư mục hiện tại vào PYTHONPATH
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
@@ -156,12 +159,60 @@ class Shard:
     def __str__(self):
         return f"Shard {self.shard_id} with {len(self.nodes)} nodes"
 
+# Hàm xử lý giao dịch đơn lẻ cho đa luồng
+def _process_single_transaction(tx, sim_context):
+    """Xử lý một giao dịch đơn lẻ trong luồng riêng"""
+    shards = sim_context['shards']
+    
+    # Kiểm tra xem đây có phải là giao dịch xuyên shard không
+    if tx.is_cross_shard:
+        # Mô phỏng việc định tuyến thông qua các shard
+        tx.hops = max(1, abs(tx.target_shard - tx.source_shard))
+        
+        # Tính độ trễ và tiêu thụ năng lượng
+        base_latency = 10 + (5 * tx.hops)  # Cơ sở + 5ms cho mỗi hop
+        congestion_factor = max(shards[tx.source_shard].congestion_level, 
+                             shards[tx.target_shard].congestion_level)
+        
+        # Điều chỉnh độ trễ dựa trên mức độ tắc nghẽn
+        tx.latency = base_latency * (1 + congestion_factor * 2)
+        
+        # Tính toán năng lượng tiêu thụ
+        base_energy = 2.0 * tx.size  # Cơ sở 2 đơn vị năng lượng cho mỗi đơn vị kích thước
+        hop_energy = 0.5 * tx.hops    # 0.5 đơn vị cho mỗi hop
+        tx.energy = base_energy + hop_energy
+    else:
+        # Giao dịch nội shard
+        tx.hops = 1
+        tx.latency = 5 * (1 + shards[tx.source_shard].congestion_level)  # 5ms cơ sở
+        tx.energy = 1.0 * tx.size  # 1 đơn vị năng lượng cho mỗi đơn vị kích thước
+    
+    # Kiểm tra xem giao dịch có bị ảnh hưởng bởi nút độc hại không
+    source_shard = shards[tx.source_shard]
+    target_shard = shards[tx.target_shard]
+    malicious_node_ratio = (
+        len(source_shard.get_malicious_nodes()) / len(source_shard.nodes) +
+        len(target_shard.get_malicious_nodes()) / len(target_shard.nodes)
+    ) / 2
+    
+    # Xác suất thành công dựa trên tỷ lệ nút độc hại
+    success_probability = 1.0 - (malicious_node_ratio * 0.8)  # 80% ảnh hưởng từ nút độc hại
+    
+    # Đánh dấu giao dịch là đã xử lý
+    tx.processing_attempts += 1
+    if random.random() < success_probability:
+        tx.mark_completed()
+        return (tx, True)
+    else:
+        return (tx, False)
+
 class LargeScaleBlockchainSimulation:
     def __init__(self, 
                  num_shards=10, 
                  nodes_per_shard=20,
                  malicious_percentage=0,
-                 attack_scenario=None):
+                 attack_scenario=None,
+                 max_workers=None):
         self.num_shards = num_shards
         self.nodes_per_shard = nodes_per_shard
         self.malicious_percentage = malicious_percentage
@@ -172,6 +223,9 @@ class LargeScaleBlockchainSimulation:
         self.current_step = 0
         self.tx_counter = 0
         self.simulation_start_time = time.time()
+        
+        # Số lượng worker tối đa cho đa luồng, mặc định là số lõi CPU * 2
+        self.max_workers = max_workers or (multiprocessing.cpu_count() * 2)
         
         # Mở rộng các chỉ số
         self.metrics = {
@@ -213,8 +267,16 @@ class LargeScaleBlockchainSimulation:
                 self.attack_types = ['sybil']
             elif attack_scenario == 'eclipse':
                 self.attack_types = ['eclipse']
+            elif attack_scenario == 'selfish_mining':
+                self.attack_types = ['selfish_mining']
+            elif attack_scenario == 'bribery':
+                self.attack_types = ['bribery']
+            elif attack_scenario == 'ddos':
+                self.attack_types = ['ddos']
+            elif attack_scenario == 'finney':
+                self.attack_types = ['finney']
             elif attack_scenario == 'mixed':
-                self.attack_types = ['51_percent', 'sybil', 'eclipse']
+                self.attack_types = ['51_percent', 'sybil', 'eclipse', 'selfish_mining']
         
         self._initialize_blockchain()
         
@@ -332,168 +394,76 @@ class LargeScaleBlockchainSimulation:
         for shard in self.shards:
             # Cập nhật mức độ tắc nghẽn
             shard.update_congestion()
-            
-            # Xử lý giao dịch trong hàng đợi
-            tx_to_remove = []
-            
+        
+        # Chuẩn bị context cho xử lý đa luồng
+        sim_context = {
+            'shards': self.shards,
+            'attack_types': [self.attack_scenario] if self.attack_scenario else []
+        }
+        
+        # Thu thập tất cả các giao dịch cần xử lý từ tất cả các shard
+        all_transactions = []
+        for shard in self.shards:
             # Lấy các nút không độc hại để xử lý
             validators = shard.get_non_malicious_nodes()
             
-            # Nếu không có đủ nút xác thực, bỏ qua xử lý
+            # Nếu không có đủ nút xác thực, bỏ qua shard này
             if len(validators) < self.nodes_per_shard / 2:
                 continue
-            
-            # Trong kịch bản tấn công 51%, kiểm tra xem nút độc hại có chiếm đa số không
-            malicious_power = 0
-            total_power = 0
-            
-            for node in shard.nodes:
-                total_power += node.processing_power
-                if node.is_malicious:
-                    malicious_power += node.processing_power
-            
-            is_51_percent_vulnerable = (malicious_power / total_power) > 0.51
-            
+                
             # Sắp xếp giao dịch theo ưu tiên
             shard.transactions_queue.sort(key=lambda tx: tx.priority, reverse=True)
             
-            # Xử lý các giao dịch
-            for tx in shard.transactions_queue[:15]:  # Xử lý tối đa 15 giao dịch mỗi lần
-                tx.processing_attempts += 1
-                
-                # Đối với giao dịch nội shard
-                if tx.source_shard == tx.target_shard:
-                    # Tính tỷ lệ độc hại trong shard
-                    malicious_ratio = len(shard.get_malicious_nodes()) / len(shard.nodes)
+            # Chỉ xử lý tối đa 15 giao dịch mỗi shard
+            all_transactions.extend(shard.transactions_queue[:15])
+            
+        # Sử dụng ThreadPoolExecutor để xử lý song song
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            # Tạo một partial function với context cố định
+            process_tx_with_context = partial(_process_single_transaction, sim_context=sim_context)
+            
+            # Submit tất cả các giao dịch cho executor
+            future_to_tx = {executor.submit(process_tx_with_context, tx): tx for tx in all_transactions}
+            
+            # Xử lý kết quả khi hoàn thành
+            for future in as_completed(future_to_tx):
+                tx = future_to_tx[future]
+                try:
+                    result_tx, success = future.result()
                     
-                    # Tính độ trễ (ms) và năng lượng
-                    base_latency = random.uniform(10, 30)
-                    tx.latency = base_latency * (1 + shard.congestion_level + (0.5 * shard.consensus_difficulty))
-                    tx.energy = base_latency * 0.5 * (1 + 0.3 * shard.resource_utilization)
+                    # Xóa khỏi hàng đợi của shard
+                    source_shard = self.shards[tx.source_shard]
+                    if tx in source_shard.transactions_queue:
+                        source_shard.transactions_queue.remove(tx)
                     
-                    # Xử lý tấn công 51% - nếu nút độc hại chiếm đa số, giao dịch có thể bị can thiệp
-                    if '51_percent' in self.attack_types and is_51_percent_vulnerable:
-                        if random.random() < 0.7:  # 70% xác suất giao dịch bị ảnh hưởng
-                            # Giao dịch bị từ chối hoặc thay đổi
-                            tx.latency *= 3  # Tăng độ trễ
-                            if random.random() < 0.5:
-                                tx.is_processed = False
-                                blocked_count += 1
-                                shard.blocked_transactions.append(tx)
-                                tx_to_remove.append(tx)
-                                continue  # Bỏ qua giao dịch này
-                    
-                    # Đánh dấu giao dịch đã hoàn thành
-                    tx.mark_completed()
-                    tx_to_remove.append(tx)
-                    self.processed_transactions.append(tx)
-                    processed_count += 1
-                    
-                    # Gán xử lý cho một nút ngẫu nhiên
-                    validator = random.choice(validators)
-                    validator.transactions_processed += 1
-                    validator.update_trust_score(1.0)  # Cập nhật điểm tin cậy
-                    
-                else:
-                    # Đối với giao dịch xuyên shard
-                    target_shard = self.shards[tx.target_shard]
-                    
-                    # Tìm đường dẫn giữa các shard
-                    source_nodes = shard.nodes
-                    target_nodes = target_shard.nodes
-                    
-                    path_found = False
-                    for s_node in source_nodes:
-                        if path_found:
-                            break
-                        
-                        for t_node in target_nodes:
-                            if t_node in s_node.connections:
-                                # Đường dẫn trực tiếp
-                                tx.route = [s_node, t_node]
-                                tx.hops = 1
-                                total_hops += 1
-                                
-                                # Tính độ trễ và năng lượng
-                                hop_latency = random.uniform(20, 50)
-                                tx.latency = hop_latency * (1 + shard.congestion_level + target_shard.congestion_level)
-                                tx.energy = hop_latency * 0.8 * (1 + 0.2 * (s_node.energy_efficiency + t_node.energy_efficiency)/2)
-                                
-                                path_found = True
-                                break
-                    
-                    if not path_found:
-                        # Tìm đường dẫn gián tiếp (2 hop)
-                        for s_node in source_nodes:
-                            if path_found:
-                                break
-                                
-                            for mid_node in s_node.connections:
-                                if path_found:
-                                    break
-                                    
-                                for t_node in target_nodes:
-                                    if t_node in mid_node.connections:
-                                        tx.route = [s_node, mid_node, t_node]
-                                        tx.hops = 2
-                                        total_hops += 2
-                                        
-                                        # Tính độ trễ và năng lượng
-                                        hop_latency = random.uniform(40, 100)
-                                        mid_shard = self.shards[int(mid_node.shard_id)]
-                                        congestion_factor = (1 + shard.congestion_level + 
-                                                           mid_shard.congestion_level + 
-                                                           target_shard.congestion_level)
-                                        tx.latency = hop_latency * congestion_factor
-                                        tx.energy = hop_latency * 1.2 * (1 + 0.1 * (s_node.energy_efficiency + 
-                                                                                  mid_node.energy_efficiency + 
-                                                                                  t_node.energy_efficiency)/3)
-                                        
-                                        path_found = True
-                                        break
-                    
-                    # Nếu tìm thấy đường dẫn, đánh dấu là đã xử lý
-                    if path_found:
-                        tx.mark_completed()
-                        tx_to_remove.append(tx)
-                        self.processed_transactions.append(tx)
+                    if success:
+                        # Giao dịch thành công
+                        self.processed_transactions.append(result_tx)
+                        source_shard.processed_transactions.append(result_tx)
                         processed_count += 1
                         
-                        # Cập nhật thống kê cho các nút trong đường dẫn
-                        for node in tx.route:
-                            node.transactions_processed += 1
-                            node.update_trust_score(1.0)
+                        # Cập nhật thống kê
+                        if result_tx.is_cross_shard:
+                            total_hops += result_tx.hops
                     else:
-                        # Không tìm thấy đường dẫn, tăng độ trễ
-                        tx.latency += 50
-                        
-                        # Nếu đã thử nhiều lần mà không thành công, đánh dấu là bị chặn
-                        if tx.processing_attempts > 5:
-                            shard.blocked_transactions.append(tx)
-                            tx_to_remove.append(tx)
-                            blocked_count += 1
+                        # Giao dịch thất bại
+                        blocked_count += 1
+                        source_shard.blocked_transactions.append(result_tx)
+                except Exception as e:
+                    print(f"Lỗi khi xử lý giao dịch: {e}")
+        
+        # Cập nhật thống kê
+        if processed_count > 0:
+            avg_hops = total_hops / max(1, processed_count)
+        else:
+            avg_hops = 0
             
-            # Xóa các giao dịch đã xử lý hoặc bị chặn khỏi hàng đợi
-            for tx in tx_to_remove:
-                if tx in shard.transactions_queue:
-                    shard.transactions_queue.remove(tx)
-        
-        # Cập nhật thống kê theo thời gian thực
-        self.real_time_stats['elapsed_time'] = time.time() - self.real_time_stats['start_time']
-        self.real_time_stats['tx_per_second'] = len(self.processed_transactions) / max(1, self.real_time_stats['elapsed_time'])
-        
-        # Tính thời gian xử lý trung bình
-        if self.processed_transactions:
-            completion_times = [tx.completion_time - tx.timestamp for tx in self.processed_transactions if tx.completion_time]
-            if completion_times:
-                self.real_time_stats['avg_processing_time'] = sum(completion_times) / len(completion_times)
-        
-        # Cập nhật đỉnh hiệu suất
-        if self.real_time_stats['tx_per_second'] > self.real_time_stats['peak_throughput']:
-            self.real_time_stats['peak_throughput'] = self.real_time_stats['tx_per_second']
-        
-        # Tính số hop trung bình
-        avg_hops = total_hops / max(1, processed_count)
+        # Cập nhật tin cậy của các nút
+        for shard in self.shards:
+            for node in shard.nodes:
+                # Cập nhật điểm tin cậy dựa trên số giao dịch đã xử lý
+                success_rate = min(1.0, node.transactions_processed / max(1, processed_count + blocked_count))
+                node.update_trust_score(success_rate)
         
         return processed_count, blocked_count, avg_hops
     
@@ -549,26 +519,48 @@ class LargeScaleBlockchainSimulation:
         # Tính số hop trung bình
         avg_hops = sum(tx.hops for tx in self.processed_transactions) / len(self.processed_transactions)
         
-        # Tính điểm bảo mật (dựa trên tỷ lệ nút độc hại và loại tấn công)
-        total_malicious = sum(len(shard.get_malicious_nodes()) for shard in self.shards)
-        total_nodes = self.num_shards * self.nodes_per_shard
+        # Tính an toàn (security score) dựa trên phân bố điểm tin cậy
+        total_nodes = sum(len(shard.nodes) for shard in self.shards)
+        malicious_nodes = sum(len(shard.get_malicious_nodes()) for shard in self.shards)
+        malicious_ratio = malicious_nodes / total_nodes if total_nodes > 0 else 0
         
-        # Điểm cơ bản dựa trên tỷ lệ nút trung thực
-        honest_ratio = 1 - (total_malicious / total_nodes)
+        # Cách tính cải tiến, xem xét cả điểm tin cậy của các nút
+        trust_scores = []
+        for shard in self.shards:
+            for node in shard.nodes:
+                trust_scores.append(node.trust_score)
         
-        # Điều chỉnh điểm bảo mật dựa trên loại tấn công
-        security_penalty = 0
-        if '51_percent' in self.attack_types:
-            security_penalty += 0.3
-        if 'sybil' in self.attack_types:
-            security_penalty += 0.2
-        if 'eclipse' in self.attack_types:
-            security_penalty += 0.25
+        avg_trust = sum(trust_scores) / len(trust_scores) if trust_scores else 0
         
-        security_score = max(0, honest_ratio - security_penalty)
+        # Tính security score - cải thiện công thức
+        max_malicious_threshold = 0.45  # Ngưỡng tỷ lệ độc hại tối đa có thể chịu được
+        if malicious_ratio >= 0.51:  # Tấn công 51%
+            security = max(0, 0.2 - (malicious_ratio - 0.51) * 2) * avg_trust
+        elif malicious_ratio > max_malicious_threshold:  # Gần với ngưỡng nguy hiểm
+            security = max(0, 1 - ((malicious_ratio - max_malicious_threshold) / (0.51 - max_malicious_threshold))) * avg_trust
+        else:
+            security = (1 - (malicious_ratio / max_malicious_threshold)) * avg_trust
         
         # Tính khả năng phục hồi mạng
-        network_resilience = network_stability * (1 - resource_utilization) * security_score
+        # Cải thiện khả năng phục hồi đối với tấn công 51%
+        if '51_percent' in self.attack_types and malicious_ratio >= 0.51:
+            # Tỷ lệ nút độc hại có điểm tin cậy thấp (đã bị phát hiện)
+            detected_malicious = sum(1 for shard in self.shards 
+                                   for node in shard.get_malicious_nodes() 
+                                   if node.trust_score < 0.5)
+            detection_rate = detected_malicious / max(1, malicious_nodes)
+            
+            # Khả năng phục hồi sẽ phụ thuộc vào tỷ lệ phát hiện và số lượng nút độc hại
+            network_resilience = detection_rate * (1 - malicious_ratio/0.7) * security
+            network_resilience = max(0, min(0.6, network_resilience))  # Giới hạn tối đa 0.6 cho tấn công 51%
+        elif malicious_ratio > 0.3:
+            # Đối với tỷ lệ độc hại cao nhưng chưa đạt 51%
+            network_resilience = (1 - malicious_ratio) * security * 0.7
+        else:
+            # Đối với tỷ lệ độc hại thấp
+            network_resilience = (1 - malicious_ratio) * security
+        
+        network_resilience = max(0, min(1, network_resilience))  # Giới hạn 0-1
         
         # Tính kích thước khối trung bình (giả lập)
         avg_block_size = sum(tx.size for tx in self.processed_transactions[-100:]) / min(100, len(self.processed_transactions))
@@ -580,7 +572,7 @@ class LargeScaleBlockchainSimulation:
             'throughput': throughput,
             'latency': avg_latency,
             'energy': avg_energy,
-            'security': security_score,
+            'security': security,
             'cross_shard_ratio': cross_shard_ratio,
             'transaction_success_rate': success_rate,
             'network_stability': network_stability,
@@ -1038,7 +1030,8 @@ def main():
     parser.add_argument('--steps', type=int, default=1000, help='Số bước mô phỏng')
     parser.add_argument('--tx-per-step', type=int, default=50, help='Số giao dịch mỗi bước')
     parser.add_argument('--malicious', type=float, default=0, help='Tỷ lệ % nút độc hại')
-    parser.add_argument('--attack', type=str, choices=['51_percent', 'sybil', 'eclipse', 'mixed', None], 
+    parser.add_argument('--attack', type=str, 
+                        choices=['51_percent', 'sybil', 'eclipse', 'selfish_mining', 'bribery', 'ddos', 'finney', 'mixed', None], 
                         default=None, help='Kịch bản tấn công')
     parser.add_argument('--save-dir', type=str, default='results_attack', help='Thư mục lưu kết quả')
     parser.add_argument('--no-display', action='store_true', help='Không hiển thị biểu đồ trên màn hình')

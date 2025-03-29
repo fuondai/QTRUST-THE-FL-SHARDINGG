@@ -3,43 +3,70 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# C extensions
+*.so
+
 # Distribution / packaging
-*.egg-info/
 dist/
 build/
-eggs/
-.eggs/
+*.egg-info/
 
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-.hypothesis/
-.pytest_cache/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# Environments
-.env
-.venv
+# Virtual environments
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
 
+# Jupyter Notebook
+.ipynb_checkpoints
+
 # IDE specific files
 .idea/
 .vscode/
 *.swp
 *.swo
+
+# Local configurations
+.env
+.env.local
+
+# Project specific
+models/
+logs/
+results_comparison/
+*.png
+*.jpg
+*.jpeg
+*.pdf
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Temp files
+.temp/
+.tmp/
+
+# Unit test / coverage reports
+.tox/
+.nox/
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+!charts/.gitkeep
+
+# Documentation build
+docs/_build/
+_docs_html/
+
+# Configurations
+config.local.yaml
+.cursorrules
 
 # Logs and results
 *.log
@@ -67,23 +94,10 @@ docker-compose.override.yml
 
 # Temporary files
 *.bak
-*.tmp
 *.temp
-.temp/
-.tmp/
 tmp/
 
 # Generated charts
 charts/*.png
 charts/*.jpg
 charts/*.pdf
-!charts/.gitkeep
-
-# Documentation build
-docs/_build/
-_docs_html/
-
-# Local configuration
-config.local.yaml
-.env.local 
-.cursorrules

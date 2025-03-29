@@ -14,7 +14,7 @@ from large_scale_simulation import LargeScaleBlockchainSimulation
 
 def run_attack_comparison(base_args, output_dir='results_attack_comparison'):
     """Chạy so sánh các loại tấn công khác nhau."""
-    attack_types = [None, '51_percent', 'sybil', 'eclipse', 'mixed']
+    attack_types = [None, '51_percent', 'sybil', 'eclipse', 'selfish_mining', 'bribery', 'ddos', 'finney', 'mixed']
     all_metrics = {}
     
     # Tạo thư mục đầu ra
@@ -31,6 +31,16 @@ def run_attack_comparison(base_args, output_dir='results_attack_comparison'):
         malicious_percentage = base_args.malicious
         if attack_type == '51_percent':
             malicious_percentage = 51
+        elif attack_type == 'sybil':
+            malicious_percentage = 30
+        elif attack_type == 'selfish_mining':
+            malicious_percentage = 20
+        elif attack_type == 'bribery':
+            malicious_percentage = 25
+        elif attack_type == 'ddos':
+            malicious_percentage = 15
+        elif attack_type == 'finney':
+            malicious_percentage = 20
         elif attack_type == 'mixed':
             malicious_percentage = 40
         

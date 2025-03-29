@@ -469,4 +469,601 @@ def plot_metrics_over_time(metrics_over_time: Dict[str, List[float]],
     else:
         plt.show()
     
+    plt.close()
+
+class SecurityMetrics:
+    """
+    Lớp theo dõi và phân tích các chỉ số bảo mật trong hệ thống QTrust.
+    """
+    def __init__(self, window_size: int = 20):
+        """
+        Khởi tạo đối tượng SecurityMetrics.
+        
+        Args:
+            window_size: Kích thước cửa sổ phân tích cho các chỉ số bảo mật
+        """
+        self.analysis_window = window_size
+        self.thresholds = {
+            "51_percent": 0.7,
+            "ddos": 0.65,
+            "mixed": 0.6,
+            "selfish_mining": 0.75,
+            "bribery": 0.7
+        }
+        self.weights = {
+            "51_percent": {
+                "failed_tx_ratio": 0.3,
+                "high_value_tx_failure": 0.5,
+                "node_trust_variance": 0.2
+            },
+            "ddos": {
+                "latency_deviation": 0.5,
+                "failed_tx_ratio": 0.3,
+                "network_congestion": 0.2
+            },
+            "mixed": {
+                "failed_tx_ratio": 0.25,
+                "latency_deviation": 0.25,
+                "node_trust_variance": 0.25,
+                "high_value_tx_failure": 0.25
+            },
+            "selfish_mining": {
+                "block_withholding": 0.6,
+                "fork_rate": 0.4
+            },
+            "bribery": {
+                "voting_deviation": 0.5,
+                "trust_inconsistency": 0.5
+            }
+        }
+        
+        # Lịch sử các chỉ số tấn công
+        self.history = {
+            "attack_indicators": [],  # Danh sách các chỉ số tấn công theo thời gian
+            "detected_attacks": [],   # Danh sách các tấn công đã phát hiện
+            "node_trust_variance": [],  # Lịch sử phương sai tin cậy
+            "latency_deviation": [],  # Lịch sử biến động độ trễ
+            "failed_tx_ratio": [],    # Lịch sử tỷ lệ giao dịch thất bại
+            "security_metrics": []    # Lịch sử các chỉ số bảo mật
+        }
+        
+        # Chỉ số tấn công hiện tại
+        self.attack_indicators = {
+            "51_percent": 0.0,
+            "ddos": 0.0,
+            "mixed": 0.0,
+            "selfish_mining": 0.0,
+            "bribery": 0.0
+        }
+        
+        # Trạng thái tấn công hiện tại
+        self.current_attack = None
+        self.attack_confidence = 0.0
+        
+    def calculate_attack_indicators(self, 
+                                  failed_tx_ratio: float,
+                                  node_trust_variance: float,
+                                  latency_deviation: float,
+                                  network_metrics: Dict[str, Any],
+                                  transactions: List[Dict[str, Any]]) -> Dict[str, float]:
+        """
+        Tính toán các chỉ số cho từng loại tấn công.
+        
+        Args:
+            failed_tx_ratio: Tỷ lệ giao dịch thất bại
+            node_trust_variance: Phương sai của điểm tin cậy giữa các node
+            latency_deviation: Độ lệch của độ trễ
+            network_metrics: Các chỉ số mạng
+            transactions: Danh sách giao dịch gần đây
+            
+        Returns:
+            Dict[str, float]: Các chỉ số tấn công
+        """
+        indicators = {}
+        
+        # Tính chỉ số tấn công 51%
+        indicators['51_percent'] = self._calculate_51_percent_indicator(
+            failed_tx_ratio, node_trust_variance, transactions)
+        
+        # Tính chỉ số tấn công DDoS
+        indicators['ddos'] = self._calculate_ddos_indicator(
+            failed_tx_ratio, latency_deviation, network_metrics)
+        
+        # Tính chỉ số tấn công hỗn hợp
+        indicators['mixed'] = self._calculate_mixed_indicator(
+            failed_tx_ratio, node_trust_variance, latency_deviation, network_metrics, transactions)
+        
+        # Tính chỉ số tấn công selfish mining
+        indicators['selfish_mining'] = self._calculate_selfish_mining_indicator(
+            network_metrics, transactions)
+        
+        # Tính chỉ số tấn công bribery
+        indicators['bribery'] = self._calculate_bribery_indicator(
+            node_trust_variance, network_metrics, transactions)
+        
+        # Cập nhật lịch sử
+        self.history["attack_indicators"].append(indicators.copy())
+        self.history["node_trust_variance"].append(node_trust_variance)
+        self.history["latency_deviation"].append(latency_deviation)
+        self.history["failed_tx_ratio"].append(failed_tx_ratio)
+        
+        # Giới hạn kích thước lịch sử
+        if len(self.history["attack_indicators"]) > self.analysis_window * 2:
+            self.history["attack_indicators"].pop(0)
+            self.history["node_trust_variance"].pop(0)
+            self.history["latency_deviation"].pop(0)
+            self.history["failed_tx_ratio"].pop(0)
+        
+        # Cập nhật chỉ số tấn công hiện tại
+        self.attack_indicators = indicators
+        
+        return indicators
+    
+    def detect_attack(self) -> Tuple[Optional[str], float]:
+        """
+        Phát hiện loại tấn công dựa trên các chỉ số hiện tại.
+        
+        Returns:
+            Tuple[Optional[str], float]: (Loại tấn công, độ tin cậy)
+        """
+        # Tìm loại tấn công có chỉ số cao nhất
+        highest_indicator = 0.0
+        detected_attack = None
+        
+        for attack_type, indicator in self.attack_indicators.items():
+            if indicator > highest_indicator:
+                highest_indicator = indicator
+                detected_attack = attack_type
+        
+        # Kiểm tra có vượt quá ngưỡng không
+        if detected_attack and highest_indicator >= self.thresholds.get(detected_attack, 0.7):
+            attack_confidence = highest_indicator
+        else:
+            detected_attack = None
+            attack_confidence = 0.0
+        
+        # Cập nhật trạng thái tấn công hiện tại
+        self.current_attack = detected_attack
+        self.attack_confidence = attack_confidence
+        
+        # Lưu vào lịch sử
+        self.history["detected_attacks"].append((detected_attack, attack_confidence))
+        
+        return detected_attack, attack_confidence
+    
+    def _calculate_51_percent_indicator(self, 
+                                      failed_tx_ratio: float, 
+                                      node_trust_variance: float,
+                                      transactions: List[Dict[str, Any]]) -> float:
+        """
+        Tính chỉ số tấn công 51%.
+        
+        Args:
+            failed_tx_ratio: Tỷ lệ giao dịch thất bại
+            node_trust_variance: Phương sai của điểm tin cậy giữa các node
+            transactions: Danh sách giao dịch gần đây
+            
+        Returns:
+            float: Chỉ số tấn công 51% (0.0-1.0)
+        """
+        # Tính tỷ lệ thất bại của các giao dịch có giá trị cao
+        high_value_txs = [tx for tx in transactions if tx.get('value', 0) > 50]
+        high_value_failure_ratio = 0.0
+        if high_value_txs:
+            high_value_failure_ratio = sum(1 for tx in high_value_txs if tx.get('status') != 'completed') / len(high_value_txs)
+        
+        # Tính chỉ số tấn công 51% dựa trên trọng số
+        weights = self.weights["51_percent"]
+        indicator = (
+            weights["failed_tx_ratio"] * failed_tx_ratio +
+            weights["node_trust_variance"] * min(1.0, node_trust_variance * 10) +
+            weights["high_value_tx_failure"] * high_value_failure_ratio
+        )
+        
+        return min(1.0, indicator)
+    
+    def _calculate_ddos_indicator(self, 
+                                failed_tx_ratio: float, 
+                                latency_deviation: float,
+                                network_metrics: Dict[str, Any]) -> float:
+        """
+        Tính chỉ số tấn công DDoS.
+        
+        Args:
+            failed_tx_ratio: Tỷ lệ giao dịch thất bại
+            latency_deviation: Độ lệch của độ trễ
+            network_metrics: Các chỉ số mạng
+            
+        Returns:
+            float: Chỉ số tấn công DDoS (0.0-1.0)
+        """
+        # Tính chỉ số tắc nghẽn mạng
+        network_congestion = network_metrics.get('congestion', latency_deviation)
+        
+        # Tính chỉ số tấn công DDoS dựa trên trọng số
+        weights = self.weights["ddos"]
+        indicator = (
+            weights["failed_tx_ratio"] * failed_tx_ratio +
+            weights["latency_deviation"] * min(1.0, latency_deviation * 2) +
+            weights["network_congestion"] * network_congestion
+        )
+        
+        return min(1.0, indicator)
+    
+    def _calculate_mixed_indicator(self, 
+                                 failed_tx_ratio: float, 
+                                 node_trust_variance: float,
+                                 latency_deviation: float,
+                                 network_metrics: Dict[str, Any],
+                                 transactions: List[Dict[str, Any]]) -> float:
+        """
+        Tính chỉ số tấn công hỗn hợp.
+        
+        Args:
+            failed_tx_ratio: Tỷ lệ giao dịch thất bại
+            node_trust_variance: Phương sai của điểm tin cậy giữa các node
+            latency_deviation: Độ lệch của độ trễ
+            network_metrics: Các chỉ số mạng
+            transactions: Danh sách giao dịch gần đây
+            
+        Returns:
+            float: Chỉ số tấn công hỗn hợp (0.0-1.0)
+        """
+        # Tính tỷ lệ thất bại của các giao dịch có giá trị cao
+        high_value_txs = [tx for tx in transactions if tx.get('value', 0) > 50]
+        high_value_failure_ratio = 0.0
+        if high_value_txs:
+            high_value_failure_ratio = sum(1 for tx in high_value_txs if tx.get('status') != 'completed') / len(high_value_txs)
+        
+        # Tính chỉ số tấn công hỗn hợp dựa trên trọng số
+        weights = self.weights["mixed"]
+        indicator = (
+            weights["failed_tx_ratio"] * failed_tx_ratio +
+            weights["latency_deviation"] * latency_deviation +
+            weights["node_trust_variance"] * min(1.0, node_trust_variance * 5) +
+            weights["high_value_tx_failure"] * high_value_failure_ratio
+        )
+        
+        # Tính entropy của sự biến đổi tin cậy
+        trust_entropy = self._calculate_trust_entropy(network_metrics)
+        
+        # Tấn công hỗn hợp thường có các chỉ số không nhất quán và sự biến đổi lớn
+        # Phát hiện các mẫu đa dạng
+        mixed_patterns = 0
+        if failed_tx_ratio > 0.4:
+            mixed_patterns += 1
+        if latency_deviation > 0.5:
+            mixed_patterns += 1
+        if node_trust_variance > 0.1:  # Ngưỡng thấp hơn để tăng độ nhạy
+            mixed_patterns += 1
+        if high_value_failure_ratio > 0.6:
+            mixed_patterns += 1
+        if trust_entropy > 0.6:
+            mixed_patterns += 1
+            
+        # Tăng chỉ số nếu phát hiện nhiều mẫu đặc trưng của tấn công hỗn hợp
+        if mixed_patterns >= 3:
+            indicator *= 1.0 + (mixed_patterns - 2) * 0.1
+            
+        return min(1.0, indicator)
+    
+    def _calculate_selfish_mining_indicator(self, 
+                                          network_metrics: Dict[str, Any],
+                                          transactions: List[Dict[str, Any]]) -> float:
+        """
+        Tính chỉ số tấn công selfish mining.
+        
+        Args:
+            network_metrics: Các chỉ số mạng
+            transactions: Danh sách giao dịch gần đây
+            
+        Returns:
+            float: Chỉ số tấn công selfish mining (0.0-1.0)
+        """
+        # Selfish mining thường gây ra tỷ lệ fork cao và withholding block
+        fork_rate = network_metrics.get('fork_rate', 0.0)
+        block_withholding = network_metrics.get('block_withholding', 0.0)
+        
+        # Tính chỉ số tấn công selfish mining dựa trên trọng số
+        weights = self.weights["selfish_mining"]
+        indicator = (
+            weights["fork_rate"] * fork_rate +
+            weights["block_withholding"] * block_withholding
+        )
+        
+        return min(1.0, indicator)
+    
+    def _calculate_bribery_indicator(self, 
+                                   node_trust_variance: float,
+                                   network_metrics: Dict[str, Any],
+                                   transactions: List[Dict[str, Any]]) -> float:
+        """
+        Tính chỉ số tấn công bribery.
+        
+        Args:
+            node_trust_variance: Phương sai của điểm tin cậy giữa các node
+            network_metrics: Các chỉ số mạng
+            transactions: Danh sách giao dịch gần đây
+            
+        Returns:
+            float: Chỉ số tấn công bribery (0.0-1.0)
+        """
+        # Bribery thường gây ra sự không nhất quán trong biểu quyết và tin cậy
+        voting_deviation = network_metrics.get('voting_deviation', 0.0)
+        trust_inconsistency = min(1.0, node_trust_variance * 5)
+        
+        # Tính chỉ số tấn công bribery dựa trên trọng số
+        weights = self.weights["bribery"]
+        indicator = (
+            weights["voting_deviation"] * voting_deviation +
+            weights["trust_inconsistency"] * trust_inconsistency
+        )
+        
+        return min(1.0, indicator)
+
+    def _calculate_trust_entropy(self, network_metrics: Dict[str, Any]) -> float:
+        """
+        Tính entropy của sự biến đổi tin cậy.
+        
+        Args:
+            network_metrics: Các chỉ số mạng
+            
+        Returns:
+            float: Entropy của sự biến đổi tin cậy (0.0-1.0)
+        """
+        # Lấy lịch sử phương sai tin cậy
+        if len(self.history["node_trust_variance"]) < 2:
+            return 0.0
+            
+        # Tính độ biến đổi
+        trust_variances = self.history["node_trust_variance"][-self.analysis_window:]
+        trust_variance_changes = [abs(trust_variances[i] - trust_variances[i-1]) 
+                                  for i in range(1, len(trust_variances))]
+        
+        if not trust_variance_changes:
+            return 0.0
+            
+        # Tính entropy đơn giản dựa trên mức độ biến động
+        avg_change = np.mean(trust_variance_changes)
+        max_change = max(trust_variance_changes)
+        entropy = avg_change / max(0.001, max_change)
+        
+        return min(1.0, entropy * 2)  # Nhân 2 để tăng độ nhạy
+
+    def update_security_metrics(self, 
+                              detected_attack: str,
+                              attack_confidence: float,
+                              network_metrics: Dict[str, Any],
+                              previous_state: Dict[str, Any]) -> Dict[str, float]:
+        """
+        Cập nhật và trả về các chỉ số bảo mật dựa trên tấn công được phát hiện.
+        
+        Args:
+            detected_attack: Loại tấn công được phát hiện
+            attack_confidence: Độ tin cậy của phát hiện tấn công
+            network_metrics: Các chỉ số mạng hiện tại
+            previous_state: Trạng thái bảo mật trước đó
+            
+        Returns:
+            Dict[str, float]: Các chỉ số bảo mật được cập nhật
+        """
+        security_metrics = {}
+        
+        # Cập nhật chỉ số tổng quát
+        security_metrics['overall_security'] = 1.0 - (attack_confidence if detected_attack else 0.0)
+        
+        # Cập nhật chỉ số phục hồi
+        prev_security = previous_state.get('overall_security', 1.0)
+        security_metrics['recovery_rate'] = max(0.0, (security_metrics['overall_security'] - prev_security) / max(0.01, 1.0 - prev_security))
+        
+        # Cập nhật chỉ số phát hiện
+        security_metrics['detection_level'] = attack_confidence if detected_attack else 0.0
+        
+        # Cập nhật điểm bảo vệ cho từng loại tấn công
+        security_metrics['51_percent_protection'] = 1.0 - self.attack_indicators.get('51_percent', 0.0)
+        security_metrics['ddos_protection'] = 1.0 - self.attack_indicators.get('ddos', 0.0)
+        security_metrics['mixed_protection'] = 1.0 - self.attack_indicators.get('mixed', 0.0)
+        
+        # Chỉ số ổn định mạng
+        security_metrics['network_stability'] = max(0.0, 1.0 - network_metrics.get('latency_deviation', 0.0))
+        
+        # Chỉ số tin cậy giao dịch
+        security_metrics['transaction_reliability'] = max(0.0, 1.0 - network_metrics.get('failed_tx_ratio', 0.0))
+        
+        return security_metrics
+
+def plot_attack_detection_results(security_metrics, output_dir=None):
+    """
+    Vẽ biểu đồ kết quả phát hiện tấn công.
+    
+    Args:
+        security_metrics: Đối tượng SecurityMetrics chứa lịch sử phát hiện tấn công
+        output_dir: Thư mục đầu ra cho biểu đồ
+    """
+    # Tạo dữ liệu cho biểu đồ
+    history = security_metrics.history
+    
+    if len(history["attack_indicators"]) < 2:
+        return
+    
+    # Chuẩn bị dữ liệu
+    time_points = list(range(len(history["attack_indicators"])))
+    attack_types = list(history["attack_indicators"][0].keys())
+    
+    # Tạo dataframe cho dễ vẽ
+    attack_data = {attack_type: [indicators[attack_type] for indicators in history["attack_indicators"]] 
+                  for attack_type in attack_types}
+    attack_data['time'] = time_points
+    df = pd.DataFrame(attack_data)
+    
+    # Chuẩn bị dữ liệu cho tấn công được phát hiện
+    detected_data = []
+    for i, (attack, confidence) in enumerate(history["detected_attacks"]):
+        if attack:
+            detected_data.append((i, attack, confidence))
+    
+    # Vẽ biểu đồ
+    plt.figure(figsize=(12, 8))
+    
+    # Vẽ chỉ số các loại tấn công
+    for attack_type in attack_types:
+        plt.plot(df['time'], df[attack_type], label=f'{attack_type} Indicator')
+    
+    # Vẽ ngưỡng phát hiện
+    for attack_type, threshold in security_metrics.thresholds.items():
+        if attack_type in attack_types:
+            plt.axhline(y=threshold, linestyle='--', alpha=0.5, color='gray', 
+                       label=f'{attack_type} Threshold')
+    
+    # Đánh dấu các điểm phát hiện tấn công
+    if detected_data:
+        for time_point, attack, confidence in detected_data:
+            plt.scatter(time_point, confidence, marker='*', s=150, 
+                       color='red', label=f'Detected {attack}' if attack != detected_data[0][1] else None)
+            plt.annotate(f'{attack}', (time_point, confidence), 
+                        xytext=(5, 5), textcoords='offset points')
+    
+    plt.title('Attack Detection Results Over Time')
+    plt.xlabel('Time Steps')
+    plt.ylabel('Attack Indicator Value')
+    plt.legend(loc='upper left', bbox_to_anchor=(1, 1))
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    
+    # Lưu biểu đồ nếu cần
+    if output_dir:
+        plt.savefig(f"{output_dir}/attack_detection_results.png", dpi=300, bbox_inches='tight')
+    else:
+        plt.show()
+    
+    plt.close()
+
+def plot_security_metrics_comparison(security_metrics, output_dir=None):
+    """
+    So sánh các chỉ số bảo mật giữa các thời điểm khác nhau.
+    
+    Args:
+        security_metrics: Danh sách các chỉ số bảo mật theo thời gian
+        output_dir: Thư mục đầu ra cho biểu đồ
+    """
+    # Kiểm tra dữ liệu đầu vào
+    if not isinstance(security_metrics, list) or len(security_metrics) < 2:
+        return
+    
+    # Chuẩn bị dữ liệu
+    metrics_keys = ['overall_security', 'recovery_rate', 'detection_level', 
+                   '51_percent_protection', 'ddos_protection', 'mixed_protection',
+                   'network_stability', 'transaction_reliability']
+    
+    # Tạo dataframe chứa dữ liệu từ các thời điểm
+    data = []
+    for i, metrics in enumerate(security_metrics):
+        metrics_values = {key: metrics.get(key, 0.0) for key in metrics_keys if key in metrics}
+        metrics_values['time_point'] = i
+        data.append(metrics_values)
+    
+    df = pd.DataFrame(data)
+    
+    # Tạo biểu đồ so sánh
+    plt.figure(figsize=(14, 10))
+    
+    # Vẽ từng chỉ số theo thời gian
+    for key in metrics_keys:
+        if key in df.columns:
+            plt.plot(df['time_point'], df[key], marker='o', label=key)
+    
+    plt.title('Security Metrics Comparison Over Time')
+    plt.xlabel('Time Points')
+    plt.ylabel('Metric Value')
+    plt.legend(loc='upper left', bbox_to_anchor=(1, 1))
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    
+    # Lưu biểu đồ nếu cần
+    if output_dir:
+        plt.savefig(f"{output_dir}/security_metrics_comparison.png", dpi=300, bbox_inches='tight')
+    else:
+        plt.show()
+    
+    plt.close()
+    
+    # Biểu đồ heatmap cho sự thay đổi của các chỉ số theo thời gian
+    if len(df) > 5:
+        plt.figure(figsize=(12, 8))
+        
+        # Chuẩn bị dữ liệu cho heatmap
+        heatmap_data = df[metrics_keys].T if all(key in df.columns for key in metrics_keys) else df.drop('time_point', axis=1).T
+        
+        # Vẽ heatmap
+        sns.heatmap(heatmap_data, cmap='YlGnBu', annot=True, fmt='.2f', linewidths=0.5)
+        
+        plt.title('Security Metrics Change Over Time')
+        plt.xlabel('Time Points')
+        plt.ylabel('Security Metrics')
+        plt.tight_layout()
+        
+        # Lưu biểu đồ nếu cần
+        if output_dir:
+            plt.savefig(f"{output_dir}/security_metrics_heatmap.png", dpi=300, bbox_inches='tight')
+        else:
+            plt.show()
+        
+        plt.close()
+
+def plot_attack_impact_radar(attack_metrics, output_dir=None):
+    """
+    Vẽ biểu đồ radar để so sánh tác động của các loại tấn công khác nhau.
+    
+    Args:
+        attack_metrics: Dict chứa các chỉ số ảnh hưởng của các loại tấn công
+        output_dir: Thư mục đầu ra cho biểu đồ
+    """
+    # Kiểm tra dữ liệu đầu vào
+    if not isinstance(attack_metrics, dict) or not attack_metrics:
+        return
+    
+    # Chuẩn bị dữ liệu
+    attack_types = list(attack_metrics.keys())
+    metrics = list(attack_metrics[attack_types[0]].keys()) if attack_types else []
+    
+    if not metrics:
+        return
+    
+    # Tạo dataframe
+    data = {metric: [attack_metrics[attack][metric] for attack in attack_types] for metric in metrics}
+    df = pd.DataFrame(data, index=attack_types)
+    
+    # Chuẩn bị dữ liệu cho biểu đồ radar
+    categories = metrics
+    N = len(categories)
+    
+    # Tạo góc cho mỗi chỉ số
+    angles = [n / float(N) * 2 * np.pi for n in range(N)]
+    angles += angles[:1]  # Đóng vòng
+    
+    # Tạo biểu đồ
+    fig, ax = plt.subplots(figsize=(10, 10), subplot_kw=dict(polar=True))
+    
+    # Thêm dữ liệu cho từng loại tấn công
+    for attack in attack_types:
+        values = df.loc[attack].tolist()
+        values += values[:1]  # Đóng vòng
+        ax.plot(angles, values, linewidth=2, label=attack)
+        ax.fill(angles, values, alpha=0.25)
+    
+    # Tùy chỉnh biểu đồ
+    ax.set_theta_offset(np.pi / 2)
+    ax.set_theta_direction(-1)
+    ax.set_thetagrids(np.degrees(angles[:-1]), categories)
+    
+    ax.set_ylim(0, 1)
+    plt.legend(loc='upper right', bbox_to_anchor=(0.1, 0.1))
+    plt.title('Attack Impact Comparison')
+    
+    # Lưu biểu đồ nếu cần
+    if output_dir:
+        plt.savefig(f"{output_dir}/attack_impact_radar.png", dpi=300, bbox_inches='tight')
+    else:
+        plt.show()
+    
     plt.close() 
