@@ -4,27 +4,33 @@ from typing import Dict, List, Tuple, Any, Optional, Set
 import heapq
 import random
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
+import math
 
 class MADRAPIDRouter:
     """
     Multi-Agent Dynamic Routing and Adaptive Path Intelligence Distribution (MAD-RAPID).
     Thuật toán định tuyến thông minh cho giao dịch xuyên shard trong mạng blockchain.
+    Bao gồm proximity-aware routing, dynamic mesh connections và predictive routing.
     """
     
     def __init__(self, 
                  network: nx.Graph,
                  shards: List[List[int]],
-                 congestion_weight: float = 0.5,
+                 congestion_weight: float = 0.4,
                  latency_weight: float = 0.3,
                  energy_weight: float = 0.1,
                  trust_weight: float = 0.1,
-                 prediction_horizon: int = 5,  # Tăng từ 3 lên 5
+                 prediction_horizon: int = 5,
                  congestion_threshold: float = 0.7,
-                 proximity_weight: float = 0.2,  # Thêm trọng số yếu tố gần cận
-                 use_dynamic_mesh: bool = True,  # Thêm cờ cho phép sử dụng dynamic mesh
-                 predictive_window: int = 10,  # Cửa sổ dự đoán cho giao dịch tương lai
-                 max_cache_size: int = 1000):  # Giới hạn kích thước cache
+                 proximity_weight: float = 0.3,  # Tăng ảnh hưởng của proximity
+                 use_dynamic_mesh: bool = True,
+                 predictive_window: int = 15,  # Tăng cửa sổ dự đoán
+                 max_cache_size: int = 2000,  # Tăng kích thước cache
+                 geo_awareness: bool = True,  # Mới: Nhận thức vị trí địa lý
+                 traffic_history_length: int = 100,  # Mới: Lưu lịch sử traffic
+                 dynamic_connections_limit: int = 20,  # Mới: Giới hạn kết nối động
+                 update_interval: int = 30):  # Mới: Cập nhật thường xuyên hơn
         """
         Khởi tạo bộ định tuyến MAD-RAPID.
         
@@ -41,6 +47,10 @@ class MADRAPIDRouter:
             use_dynamic_mesh: Có sử dụng dynamic mesh connections hay không
             predictive_window: Số bước giao dịch để xây dựng mô hình dự đoán
             max_cache_size: Kích thước tối đa của cache
+            geo_awareness: Tính năng nhận thức vị trí địa lý
+            traffic_history_length: Số lượng bước lưu lịch sử traffic
+            dynamic_connections_limit: Giới hạn số lượng kết nối động
+            update_interval: Khoảng thời gian cập nhật (số bước)
         """
         self.network = network
         self.shards = shards
@@ -59,6 +69,12 @@ class MADRAPIDRouter:
         self.use_dynamic_mesh = use_dynamic_mesh
         self.predictive_window = predictive_window
         
+        # Tham số mới
+        self.geo_awareness = geo_awareness
+        self.traffic_history_length = traffic_history_length
+        self.dynamic_connections_limit = dynamic_connections_limit
+        self.mesh_update_interval = update_interval
+        
         # Lịch sử tắc nghẽn để dự đoán tắc nghẽn tương lai
         self.congestion_history = [np.zeros(self.num_shards) for _ in range(prediction_horizon)]
         
@@ -74,11 +90,15 @@ class MADRAPIDRouter:
         # Xây dựng đồ thị shard level từ network
         self.shard_graph = self._build_shard_graph()
         
-        # Thêm ma trận gần cận giữa các shard
+        # Thêm ma trận gần cận giữa các shard - cập nhật định kỳ
         self.shard_affinity = np.ones((self.num_shards, self.num_shards)) - np.eye(self.num_shards)
         
+        # Ma trận vị trí địa lý các shard - mới
+        self.geo_distance_matrix = np.zeros((self.num_shards, self.num_shards))
+        self._calculate_geo_distance_matrix()
+        
         # Thêm lưu trữ cho giao dịch lịch sử
-        self.transaction_history = []
+        self.transaction_history = deque(maxlen=self.traffic_history_length)
         
         # Dynamic mesh connections
         self.dynamic_connections = set()
@@ -86,11 +106,38 @@ class MADRAPIDRouter:
         # Thống kê lưu lượng giữa các cặp shard
         self.shard_pair_traffic = defaultdict(int)
         
+        # Lịch sử lưu lượng giao dịch giữa các cặp shard - mới
+        self.traffic_history = defaultdict(lambda: deque(maxlen=self.traffic_history_length))
+        
+        # Predictive routing model - mới
+        self.shard_traffic_pattern = {}  # Lưu mẫu lưu lượng để dự đoán
+        
+        # Temporal localization - mới
+        self.temporal_locality = defaultdict(lambda: defaultdict(float))  # (source, dest) -> time -> frequency
+        
         # Thời gian cuối cùng cập nhật dynamic mesh
         self.last_mesh_update = 0
         
-        # Khoảng thời gian (bước) giữa các lần cập nhật dynamic mesh
-        self.mesh_update_interval = 50
+        # Lịch sử lưu lượng theo thời gian - mới  
+        self.time_based_traffic = defaultdict(lambda: {})  # time_bucket -> (source, dest) -> count
+        
+        # Đường dẫn tối ưu trước đó
+        self.last_optimal_paths = {}
+    
+    def _calculate_geo_distance_matrix(self):
+        """Tính toán ma trận khoảng cách địa lý giữa các shard."""
+        for i in range(self.num_shards):
+            for j in range(self.num_shards):
+                if i == j:
+                    self.geo_distance_matrix[i, j] = 0
+                else:
+                    pos_i = self.shard_graph.nodes[i]['position']
+                    pos_j = self.shard_graph.nodes[j]['position']
+                    distance = math.sqrt((pos_i[0] - pos_j[0])**2 + (pos_i[1] - pos_j[1])**2)
+                    
+                    # Chuẩn hóa khoảng cách về [0,1]
+                    normalized_distance = min(1.0, distance / 100.0)
+                    self.geo_distance_matrix[i, j] = normalized_distance
     
     def _build_shard_graph(self) -> nx.Graph:
         """
@@ -108,22 +155,37 @@ class MADRAPIDRouter:
             x_pos = random.uniform(0, 100)
             y_pos = random.uniform(0, 100)
             
+            # Tính toán zone dựa trên vị trí địa lý - mới
+            zone_x = int(x_pos / 25)  # Chia không gian thành 4x4 zones
+            zone_y = int(y_pos / 25)
+            zone = zone_x + zone_y * 4  # 16 zones tổng cộng
+            
             shard_graph.add_node(shard_id, 
-                                congestion=0.0,
-                                trust_score=0.0,
-                                position=(x_pos, y_pos),
-                                capacity=len(self.shards[shard_id]))
+                               congestion=0.0,
+                               trust_score=0.0,
+                               position=(x_pos, y_pos),
+                               capacity=len(self.shards[shard_id]),
+                               zone=zone,  # Thêm zone - mới
+                               processing_power=random.uniform(0.7, 1.0),  # Thêm processing power - mới
+                               stability=1.0)  # Độ ổn định của shard - mới
         
         # Tính toán khoảng cách địa lý giữa các shard (dựa trên tọa độ logic)
         geographical_distances = {}
         for i in range(self.num_shards):
             pos_i = shard_graph.nodes[i]['position']
+            zone_i = shard_graph.nodes[i]['zone']
+            
             for j in range(i + 1, self.num_shards):
                 pos_j = shard_graph.nodes[j]['position']
+                zone_j = shard_graph.nodes[j]['zone']
+                
                 # Tính khoảng cách Euclidean
                 distance = np.sqrt((pos_i[0] - pos_j[0])**2 + (pos_i[1] - pos_j[1])**2)
                 geographical_distances[(i, j)] = distance
                 geographical_distances[(j, i)] = distance
+                
+                # Nếu cùng zone, tăng proximity factor - mới
+                same_zone_bonus = 0.3 if zone_i == zone_j else 0.0
         
         # Tìm các kết nối giữa các shard và tính toán độ trễ/băng thông trung bình
         for i in range(self.num_shards):
@@ -136,47 +198,79 @@ class MADRAPIDRouter:
                         if self.network.has_edge(node_i, node_j):
                             cross_shard_edges.append((node_i, node_j))
                 
+                # Yếu tố vị trí địa lý - mới
+                geo_dist = geographical_distances.get((i, j), 50)
+                norm_geo_dist = min(1.0, geo_dist / 100.0)
+                
+                # Kiểm tra zone - mới
+                zone_i = shard_graph.nodes[i]['zone']
+                zone_j = shard_graph.nodes[j]['zone']
+                same_zone = zone_i == zone_j
+                
                 if cross_shard_edges:
                     # Thêm thuộc tính latency và bandwidth nếu chưa có
                     for u, v in cross_shard_edges:
                         if 'latency' not in self.network.edges[u, v]:
                             # Tính latency dựa trên khoảng cách địa lý
-                            geo_dist = geographical_distances.get((i, j), 50)
-                            base_latency = random.uniform(5, 20)  # Latency cơ bản
-                            geo_factor = geo_dist / 100.0  # Normalized to [0,1]
+                            # Giảm latency khi cùng zone - mới
+                            zone_factor = 0.7 if same_zone else 1.0
+                            base_latency = random.uniform(3, 18)  # Giảm latency cơ bản
+                            geo_factor = norm_geo_dist  # Normalized to [0,1]
                             # Latency tăng theo khoảng cách địa lý
-                            self.network.edges[u, v]['latency'] = base_latency * (1 + geo_factor)
+                            self.network.edges[u, v]['latency'] = base_latency * (1 + geo_factor) * zone_factor
                         
                         if 'bandwidth' not in self.network.edges[u, v]:
                             # Bandwidth giảm theo khoảng cách địa lý
-                            geo_dist = geographical_distances.get((i, j), 50)
-                            base_bandwidth = random.uniform(5, 20)  # Bandwidth cơ bản (Mbps)
-                            geo_factor = geo_dist / 100.0  # Normalized to [0,1]
+                            # Tăng bandwidth khi cùng zone - mới
+                            zone_factor = 1.3 if same_zone else 1.0
+                            base_bandwidth = random.uniform(10, 30)  # Tăng bandwidth cơ bản
                             # Bandwidth giảm theo khoảng cách địa lý
-                            self.network.edges[u, v]['bandwidth'] = base_bandwidth * (1 - 0.5 * geo_factor)
+                            self.network.edges[u, v]['bandwidth'] = base_bandwidth * (1 - 0.4 * norm_geo_dist) * zone_factor
                     
                     # Tính độ trễ và băng thông trung bình của các kết nối
                     avg_latency = np.mean([self.network.edges[u, v]['latency'] for u, v in cross_shard_edges])
                     avg_bandwidth = np.mean([self.network.edges[u, v]['bandwidth'] for u, v in cross_shard_edges])
                     
                     # Tính proximity factor dựa trên khoảng cách địa lý và số lượng kết nối
-                    geo_dist = geographical_distances.get((i, j), 50)
                     num_connections = len(cross_shard_edges)
                     
                     # Proximity factor cao khi khoảng cách ngắn và nhiều kết nối
-                    proximity_factor = (1 - geo_dist/100.0) * min(1.0, num_connections / 10.0)
+                    # Tăng ảnh hưởng của proximity và same zone - mới
+                    proximity_factor = (1 - norm_geo_dist * 0.8) * min(1.0, num_connections / 8.0)
+                    if same_zone:
+                        proximity_factor += 0.2  # Bonus cho cùng zone
+                    proximity_factor = min(1.0, proximity_factor)
                     
                     # Thêm cạnh giữa hai shard với các thuộc tính mở rộng
                     shard_graph.add_edge(i, j, 
-                                        latency=avg_latency,
-                                        bandwidth=avg_bandwidth,
-                                        connection_count=len(cross_shard_edges),
-                                        geographical_distance=geo_dist,
-                                        proximity_factor=proximity_factor,
-                                        historical_traffic=0,
-                                        is_dynamic=False,
-                                        stability=1.0,  # Độ ổn định của kết nối
-                                        last_updated=time.time())
+                                       latency=avg_latency,
+                                       bandwidth=avg_bandwidth,
+                                       connection_count=len(cross_shard_edges),
+                                       geographical_distance=geo_dist,
+                                       proximity_factor=proximity_factor,
+                                       historical_traffic=0,
+                                       is_dynamic=False,
+                                       stability=1.0,  # Độ ổn định của kết nối
+                                       same_zone=same_zone,  # Mới: cờ đánh dấu cùng zone
+                                       last_updated=time.time())
+                
+                # Tự động thêm kết nối ảo giữa các shard cùng zone - mới
+                elif same_zone and self.geo_awareness:
+                    virtual_latency = 25 + norm_geo_dist * 30  # Latency cao hơn nhưng vẫn hợp lý
+                    virtual_bandwidth = 5 + (1 - norm_geo_dist) * 10
+                    
+                    shard_graph.add_edge(i, j,
+                                       latency=virtual_latency,
+                                       bandwidth=virtual_bandwidth,
+                                       connection_count=0,  # Không có kết nối thật
+                                       geographical_distance=geo_dist,
+                                       proximity_factor=0.3,  # Proximity thấp hơn
+                                       historical_traffic=0,
+                                       is_dynamic=False,
+                                       is_virtual=True,  # Đánh dấu là kết nối ảo
+                                       stability=0.7,  # Độ ổn định thấp hơn
+                                       same_zone=True,
+                                       last_updated=time.time())
         
         return shard_graph
     
@@ -850,30 +944,75 @@ class MADRAPIDRouter:
         
         self.last_mesh_update = current_time
         
+        # Thực hiện phân tích mẫu giao dịch trước khi cập nhật mesh
+        pattern_analysis = self.analyze_transaction_patterns(window_size=min(self.traffic_history_length, 50))
+        
         # Xác định các cặp shard có lưu lượng cao nhất
         top_traffic_pairs = sorted(self.shard_pair_traffic.items(), key=lambda x: x[1], reverse=True)
         
+        # Xem xét các mẫu thời gian để phát hiện các điểm nóng theo thời gian
+        time_based_hotspots = []
+        for time_bucket, traffic_map in self.time_based_traffic.items():
+            if traffic_map:  # Kiểm tra không trống
+                # Lấy top 3 cặp shard cho mỗi time bucket
+                hotspots = sorted(traffic_map.items(), key=lambda x: x[1], reverse=True)[:3]
+                time_based_hotspots.extend([pair for pair, _ in hotspots])
+        
         # Giới hạn số lượng kết nối động tối đa
-        max_dynamic_connections = min(10, self.num_shards * (self.num_shards - 1) // 4)
+        max_dynamic_connections = min(self.dynamic_connections_limit, 
+                                     self.num_shards * (self.num_shards - 1) // 3)
         
         # Loại bỏ các kết nối dynamic cũ
-        for i, j in list(self.dynamic_connections):
+        old_connections = list(self.dynamic_connections)
+        for i, j in old_connections:
             if self.shard_graph.has_edge(i, j):
-                # Nếu đã có kết nối trực tiếp giữa 2 shard, chỉ cập nhật thuộc tính
-                self.shard_graph.edges[i, j]['is_dynamic'] = False
+                # Nếu đã có kết nối trực tiếp giữa 2 shard, cập nhật thuộc tính
+                if 'is_dynamic' in self.shard_graph.edges[i, j]:
+                    self.shard_graph.edges[i, j]['is_dynamic'] = False
             self.dynamic_connections.remove((i, j))
         
         # Thêm kết nối mới cho các cặp shard có lưu lượng cao
         new_connections_count = 0
+        
+        # Ưu tiên các cặp shard trong time_based_hotspots
+        priority_pairs = []
+        for pair in time_based_hotspots:
+            if pair not in priority_pairs:
+                priority_pairs.append(pair)
+        
+        # Thêm các cặp shard từ top_traffic_pairs
         for (i, j), traffic in top_traffic_pairs:
+            if (i, j) not in priority_pairs and (j, i) not in priority_pairs:
+                priority_pairs.append((i, j))
+        
+        # Đi qua danh sách ưu tiên và thêm các kết nối dynamik
+        for i, j in priority_pairs:
             # Nếu đã đạt số lượng kết nối tối đa, dừng lại
             if new_connections_count >= max_dynamic_connections:
                 break
+            
+            # Sắp xếp lại để đảm bảo i < j
+            if i > j:
+                i, j = j, i
+                
+            # Lấy lưu lượng giao dịch
+            traffic = self.shard_pair_traffic.get((i, j), 0) + self.shard_pair_traffic.get((j, i), 0)
+            
+            # Bỏ qua nếu lưu lượng quá thấp
+            if traffic < 5:  # Ngưỡng tối thiểu để tạo dynamic connection
+                continue
                 
             # Bỏ qua nếu đã có kết nối trực tiếp giữa 2 shard
             if self.shard_graph.has_edge(i, j):
                 self.shard_graph.edges[i, j]['is_dynamic'] = True
                 self.shard_graph.edges[i, j]['historical_traffic'] = traffic
+                
+                # Cập nhật thuộc tính của kết nối dựa trên dữ liệu traffic
+                if traffic > 20:  # Traffic cao
+                    # Giảm latency và tăng bandwidth
+                    self.shard_graph.edges[i, j]['latency'] *= 0.8
+                    self.shard_graph.edges[i, j]['bandwidth'] *= 1.2
+                
                 self.dynamic_connections.add((i, j))
                 new_connections_count += 1
                 continue
@@ -883,9 +1022,36 @@ class MADRAPIDRouter:
             pos_j = self.shard_graph.nodes[j]['position']
             geo_dist = np.sqrt((pos_i[0] - pos_j[0])**2 + (pos_i[1] - pos_j[1])**2)
             
+            # Kiểm tra zone - mới
+            zone_i = self.shard_graph.nodes[i].get('zone', -1)
+            zone_j = self.shard_graph.nodes[j].get('zone', -1)
+            same_zone = zone_i == zone_j and zone_i != -1
+            
+            # Tính proximity factor - mới
+            normalized_dist = min(1.0, geo_dist / 100.0)
+            proximity_factor = 0.5 + 0.5 * (1 - normalized_dist)
+            if same_zone:
+                proximity_factor += 0.2  # Bonus cho cùng zone
+            proximity_factor = min(1.0, proximity_factor)
+            
             # Latency và bandwidth tốt hơn cho kết nối dynamic do đã được tối ưu hóa
-            latency = 5 + geo_dist * 0.3  # Latency thấp hơn cho kết nối động
-            bandwidth = 15 - geo_dist * 0.1  # Bandwidth cao hơn cho kết nối động
+            zone_factor = 0.8 if same_zone else 1.0
+            latency = (5 + normalized_dist * 15) * zone_factor  # Latency thấp hơn cho kết nối động
+            bandwidth = (15 + (1 - normalized_dist) * 15) * (1.2 if same_zone else 1.0)  # Bandwidth cao hơn
+            
+            # Tính độ ổn định dựa trên mức độ ổn định của lưu lượng
+            stability = 0.7
+            if (i, j) in self.traffic_history or (j, i) in self.traffic_history:
+                # Nếu có lịch sử lưu lượng, tính độ ổn định dựa trên biến thiên
+                history = self.traffic_history.get((i, j), self.traffic_history.get((j, i), []))
+                if len(history) > 5:
+                    # Tính hệ số biến thiên (CV)
+                    std_dev = np.std(history)
+                    mean = np.mean(history)
+                    if mean > 0:
+                        cv = std_dev / mean
+                        # Độ ổn định cao khi CV thấp
+                        stability = max(0.5, min(0.95, 1.0 - cv))
             
             # Thêm cạnh mới vào đồ thị shard
             self.shard_graph.add_edge(i, j,
@@ -893,102 +1059,292 @@ class MADRAPIDRouter:
                                      bandwidth=bandwidth,
                                      connection_count=1,
                                      geographical_distance=geo_dist,
-                                     proximity_factor=0.8,  # Cao hơn do đã được tối ưu hóa
+                                     proximity_factor=proximity_factor,
                                      historical_traffic=traffic,
                                      is_dynamic=True,
-                                     stability=0.9,  # Độ ổn định cao cho kết nối động
+                                     same_zone=same_zone,  # Mới
+                                     stability=stability,
                                      last_updated=current_time)
             
-            # Thêm vào tập kết nối động
+            # Thêm vào danh sách dynamic connections
             self.dynamic_connections.add((i, j))
             new_connections_count += 1
         
-        # Reset lưu lượng sau khi đã cập nhật
+        # Nếu đã tạo ít nhất một kết nối mới, log thông tin
         if new_connections_count > 0:
-            self.shard_pair_traffic = defaultdict(int) 
+            dynamic_edges = [(i, j, self.shard_graph.edges[i, j]['latency'], 
+                             self.shard_graph.edges[i, j]['bandwidth']) 
+                            for i, j in self.dynamic_connections]
+            print(f"Đã tạo {new_connections_count} dynamic mesh connections: {dynamic_edges}")
+        
+        # Cập nhật dynamic weight cho routing algorithm dựa trên lưu lượng - mới
+        self._update_routing_weights(pattern_analysis)
+    
+    def _update_routing_weights(self, pattern_analysis):
+        """
+        Cập nhật trọng số routing dựa trên phân tích mẫu lưu lượng.
+        
+        Args:
+            pattern_analysis: Kết quả phân tích mẫu lưu lượng
+        """
+        if not pattern_analysis.get('patterns_found', False):
+            return
+            
+        # Điều chỉnh trọng số dựa trên tỷ lệ giao dịch trong cùng một shard
+        same_shard_ratio = pattern_analysis.get('same_shard_ratio', 0.8)
+        
+        # Nếu tỷ lệ giao dịch trong cùng shard thấp, tăng proximity_weight
+        if same_shard_ratio < 0.5:
+            new_proximity_weight = min(0.4, self.proximity_weight + 0.05)
+            print(f"Điều chỉnh proximity_weight: {self.proximity_weight:.2f} -> {new_proximity_weight:.2f}")
+            self.proximity_weight = new_proximity_weight
+            
+            # Giảm congestion_weight tương ứng
+            self.congestion_weight = max(0.2, 1.0 - self.proximity_weight - self.latency_weight - self.energy_weight - self.trust_weight)
+        
+        # Nếu có nhiều giao dịch xuyên shard giữa các zone, tăng geo_awareness
+        high_traffic_pairs = pattern_analysis.get('high_traffic_pairs', [])
+        if high_traffic_pairs:
+            # Kiểm tra xem các cặp có traffic cao có cùng zone không
+            different_zone_pairs = 0
+            for i, j in high_traffic_pairs:
+                if i < len(self.shard_graph.nodes) and j < len(self.shard_graph.nodes):
+                    zone_i = self.shard_graph.nodes[i].get('zone', -1)
+                    zone_j = self.shard_graph.nodes[j].get('zone', -1)
+                    if zone_i != zone_j or zone_i == -1:
+                        different_zone_pairs += 1
+            
+            # Nếu nhiều cặp khác zone, tăng geo_awareness
+            if different_zone_pairs > len(high_traffic_pairs) / 2:
+                self.geo_awareness = True
     
     def predictive_routing(self, transaction: Dict[str, Any]) -> Tuple[int, int, bool]:
         """
-        Sử dụng dữ liệu lịch sử để dự đoán tuyến đường tối ưu cho một giao dịch.
+        Dự đoán đường dẫn tối ưu dựa trên lịch sử giao dịch và mẫu giao dịch.
         
         Args:
-            transaction: Giao dịch cần dự đoán tuyến đường
+            transaction: Giao dịch cần định tuyến
             
         Returns:
-            Tuple[int, int, bool]: (source_shard, destination_shard, prediction_confidence)
-            - source_shard: ID shard nguồn dự đoán
-            - destination_shard: ID shard đích dự đoán
-            - prediction_confidence: True nếu dự đoán có độ tin cậy cao
+            Tuple[int, int, bool]: (next_shard, final_shard, is_direct_route)
+            - next_shard: Shard tiếp theo để chuyển giao dịch
+            - final_shard: Shard đích cuối cùng
+            - is_direct_route: True nếu đường dẫn là trực tiếp (không qua shard trung gian)
         """
-        # Nếu có thông tin rõ ràng về nguồn và đích, không cần dự đoán
-        if 'source_shard' in transaction and 'destination_shard' in transaction:
-            return transaction['source_shard'], transaction['destination_shard'], True
+        source_shard = transaction['source_shard']
+        dest_shard = transaction['destination_shard']
+        tx_value = transaction.get('value', 0.0)
+        tx_priority = transaction.get('priority', 0.5)
+        tx_type = transaction.get('type', 'intra_shard')
+        tx_category = transaction.get('category', 'simple_transfer')
         
-        # Nếu không có đủ dữ liệu lịch sử, không thể dự đoán chính xác
-        if len(self.transaction_history) < 50:
-            # Trả về giá trị mặc định với độ tin cậy thấp
-            default_source = transaction.get('source_shard', 0)
-            default_dest = transaction.get('destination_shard', 0)
-            if default_source == default_dest:
-                default_dest = (default_source + 1) % self.num_shards
-            return default_source, default_dest, False
+        # Tạo ID cho cặp giao dịch
+        tx_pair_id = f"{source_shard}_{dest_shard}"
         
-        # Phân tích giao dịch để lấy các đặc trưng
-        tx_type = transaction.get('type', 'default')
-        tx_size = transaction.get('size', 1.0)
-        tx_sender = transaction.get('sender', None)
-        tx_receiver = transaction.get('receiver', None)
+        # Nếu là giao dịch nội shard, trả về source_shard là đích
+        if source_shard == dest_shard:
+            return source_shard, dest_shard, True
         
-        # Tìm kiếm các giao dịch tương tự trong lịch sử
-        similar_transactions = []
+        # Kiểm tra trong cache trước
+        cache_key = f"{source_shard}_{dest_shard}_{tx_category}_{round(tx_value)}"
+        if cache_key in self.path_cache and self.current_step - self.path_cache[cache_key]['step'] < self.cache_expire_time:
+            cached_path = self.path_cache[cache_key]['path']
+            if len(cached_path) > 1:
+                return cached_path[1], cached_path[-1], len(cached_path) == 2
         
-        for hist_tx in self.transaction_history[-100:]:  # Chỉ xem xét 100 giao dịch gần nhất
-            # So khớp theo loại và kích thước
-            type_match = hist_tx.get('type', 'default') == tx_type
-            size_match = abs(hist_tx.get('size', 1.0) - tx_size) < 0.2  # Trong khoảng 20%
+        # Kiểm tra proximity trước tiên
+        if self.geo_awareness:
+            geo_distance = self.geo_distance_matrix[source_shard, dest_shard]
             
-            # So khớp theo người gửi/nhận nếu có
-            sender_match = True
-            receiver_match = True
-            
-            if tx_sender and 'sender' in hist_tx:
-                sender_match = hist_tx['sender'] == tx_sender
-            
-            if tx_receiver and 'receiver' in hist_tx:
-                receiver_match = hist_tx['receiver'] == tx_receiver
-            
-            # Nếu match tất cả tiêu chí, thêm vào danh sách giao dịch tương tự
-            if type_match and size_match and sender_match and receiver_match:
-                if 'source_shard' in hist_tx and 'destination_shard' in hist_tx:
-                    similar_transactions.append(hist_tx)
-        
-        # Nếu có đủ giao dịch tương tự, sử dụng thông tin để dự đoán
-        if len(similar_transactions) >= 3:
-            # Đếm tần suất của các cặp source-destination
-            route_counts = {}
-            for tx in similar_transactions:
-                route = (tx['source_shard'], tx['destination_shard'])
-                route_counts[route] = route_counts.get(route, 0) + 1
-            
-            # Tìm tuyến đường phổ biến nhất
-            if route_counts:
-                most_common_route = max(route_counts.items(), key=lambda x: x[1])
-                route, count = most_common_route
+            # Nếu hai shard gần nhau địa lý và có kết nối trực tiếp
+            if geo_distance < 0.4 and self.shard_graph.has_edge(source_shard, dest_shard):
+                direct_edge = self.shard_graph.edges[source_shard, dest_shard]
                 
-                # Tính độ tin cậy dựa trên tỷ lệ xuất hiện
-                confidence_threshold = 0.6  # Ngưỡng tỷ lệ để xem là đáng tin cậy
-                confidence = count / len(similar_transactions)
-                
-                return route[0], route[1], confidence >= confidence_threshold
+                # Kiểm tra các điều kiện để sử dụng kết nối trực tiếp
+                if direct_edge.get('bandwidth', 0) > 5 and direct_edge.get('stability', 0) > 0.5:
+                    return dest_shard, dest_shard, True
         
-        # Nếu không tìm được tuyến đường đáng tin cậy, sử dụng giá trị mặc định
-        default_source = transaction.get('source_shard', 0)
-        default_dest = transaction.get('destination_shard', 0)
-        if default_source == default_dest:
-            default_dest = (default_source + 1) % self.num_shards
+        # Kiểm tra mẫu thời gian
+        current_time_bucket = self.current_step % (24 * 60)  # Giả lập 24 giờ với mỗi phút là 1 bước
+        time_slot = current_time_bucket // 60  # Chia thành 24 time slot
+        
+        # Nếu có mẫu thời gian cho cặp shard này
+        if tx_pair_id in self.temporal_locality and time_slot in self.temporal_locality[tx_pair_id]:
+            frequency = self.temporal_locality[tx_pair_id][time_slot]
             
-        return default_source, default_dest, False 
-
+            # Nếu tần suất cao, tìm đường đi nhanh nhất
+            if frequency > 0.5:
+                # Tìm đường đi nhanh nhất
+                fast_path = self._find_fastest_path(source_shard, dest_shard)
+                if fast_path and len(fast_path) > 1:
+                    # Lưu vào cache
+                    self.path_cache[cache_key] = {
+                        'path': fast_path,
+                        'step': self.current_step,
+                        'type': 'temporal_pattern'
+                    }
+                    return fast_path[1], fast_path[-1], len(fast_path) == 2
+        
+        # Kiểm tra lịch sử giao dịch gần đây
+        if len(self.transaction_history) > 0:
+            # Lọc các giao dịch tương tự gần đây
+            similar_txs = []
+            for tx in self.transaction_history[-100:]:
+                if (tx['source_shard'] == source_shard and 
+                    tx['destination_shard'] == dest_shard and
+                    tx.get('category', '') == tx_category and
+                    abs(tx.get('value', 0) - tx_value) / max(1, tx_value) < 0.3):  # Value khác <30%
+                    similar_txs.append(tx)
+            
+            if similar_txs:
+                # Tìm giao dịch gần đây nhất có cùng nguồn và đích
+                latest_similar_tx = max(similar_txs, key=lambda tx: tx.get('created_at', 0))
+                
+                # Nếu có routed_path và thành công
+                if 'routed_path' in latest_similar_tx and latest_similar_tx.get('status', '') == 'completed':
+                    historical_path = latest_similar_tx['routed_path']
+                    
+                    # Kiểm tra xem đường dẫn này còn hợp lệ không
+                    is_valid_path = True
+                    for i in range(len(historical_path) - 1):
+                        if not self.shard_graph.has_edge(historical_path[i], historical_path[i+1]):
+                            is_valid_path = False
+                            break
+                    
+                    if is_valid_path and len(historical_path) > 1:
+                        # Lưu vào cache
+                        self.path_cache[cache_key] = {
+                            'path': historical_path,
+                            'step': self.current_step,
+                            'type': 'historical'
+                        }
+                        return historical_path[1], historical_path[-1], len(historical_path) == 2
+        
+        # Xem xét dynamic mesh connections
+        if self.use_dynamic_mesh and len(self.dynamic_connections) > 0:
+            # Kiểm tra nếu có kết nối động trực tiếp
+            if (source_shard, dest_shard) in self.dynamic_connections or (dest_shard, source_shard) in self.dynamic_connections:
+                return dest_shard, dest_shard, True
+            
+            # Tìm đường đi qua dynamic mesh
+            dynamic_path = self._find_dynamic_mesh_path(source_shard, dest_shard)
+            if dynamic_path and len(dynamic_path) > 1:
+                # Lưu vào cache
+                self.path_cache[cache_key] = {
+                    'path': dynamic_path,
+                    'step': self.current_step,
+                    'type': 'dynamic_mesh'
+                }
+                return dynamic_path[1], dynamic_path[-1], len(dynamic_path) == 2
+        
+        # Nếu tất cả các phương pháp trên thất bại, sử dụng Dijkstra truyền thống
+        optimal_path = self._dijkstra(source_shard, dest_shard, transaction)
+        
+        # Lưu đường dẫn vào cache
+        if optimal_path and len(optimal_path) > 1:
+            self.path_cache[cache_key] = {
+                'path': optimal_path,
+                'step': self.current_step,
+                'type': 'dijkstra'
+            }
+            return optimal_path[1], optimal_path[-1], len(optimal_path) == 2
+        
+        # Nếu không tìm được đường đi, trả về đích trực tiếp
+        return dest_shard, dest_shard, True
+    
+    def _find_fastest_path(self, source_shard: int, dest_shard: int) -> List[int]:
+        """
+        Tìm đường đi nhanh nhất giữa hai shard.
+        
+        Args:
+            source_shard: Shard nguồn
+            dest_shard: Shard đích
+            
+        Returns:
+            List[int]: Đường đi nhanh nhất (danh sách shard ID)
+        """
+        # Nếu đã có đường đi trực tiếp, sử dụng nó
+        if self.shard_graph.has_edge(source_shard, dest_shard):
+            return [source_shard, dest_shard]
+        
+        # Sử dụng thuật toán Dijkstra focus vào latency
+        visited = set()
+        distances = {source_shard: 0}
+        previous = {}
+        priority_queue = [(0, source_shard)]
+        
+        while priority_queue:
+            current_distance, current_node = heapq.heappop(priority_queue)
+            
+            if current_node == dest_shard:
+                # Đã tìm thấy đường đi tới đích
+                return self._reconstruct_path(previous, dest_shard)
+            
+            if current_node in visited:
+                continue
+                
+            visited.add(current_node)
+            
+            for neighbor in self.shard_graph.neighbors(current_node):
+                if neighbor in visited:
+                    continue
+                
+                # Lấy độ trễ của kết nối
+                edge_latency = self.shard_graph.edges[current_node, neighbor].get('latency', 50)
+                
+                # Ưu tiên dynamic mesh connections
+                if self.shard_graph.edges[current_node, neighbor].get('is_dynamic', False):
+                    edge_latency *= 0.7  # Giảm latency cho dynamic connections
+                
+                # Tính khoảng cách mới
+                new_distance = current_distance + edge_latency
+                
+                # Nếu tìm thấy đường đi ngắn hơn hoặc chưa có đường đi
+                if neighbor not in distances or new_distance < distances[neighbor]:
+                    distances[neighbor] = new_distance
+                    previous[neighbor] = current_node
+                    heapq.heappush(priority_queue, (new_distance, neighbor))
+        
+        # Nếu không tìm thấy đường đi
+        return []
+    
+    def _find_dynamic_mesh_path(self, source_shard: int, dest_shard: int) -> List[int]:
+        """
+        Tìm đường đi thông qua các dynamic mesh connections.
+        
+        Args:
+            source_shard: Shard nguồn
+            dest_shard: Shard đích
+            
+        Returns:
+            List[int]: Đường đi qua dynamic mesh (danh sách shard ID)
+        """
+        # Tạo đồ thị dynamic mesh
+        dynamic_graph = nx.Graph()
+        
+        # Thêm tất cả các node
+        for i in range(self.num_shards):
+            dynamic_graph.add_node(i)
+        
+        # Thêm các kết nối dynamic
+        for i, j in self.dynamic_connections:
+            dynamic_graph.add_edge(i, j)
+        
+        # Thêm các kết nối trực tiếp giữa các shard
+        for i, j in self.shard_graph.edges():
+            dynamic_graph.add_edge(i, j)
+        
+        # Sử dụng thuật toán đường đi ngắn nhất của networkx
+        try:
+            # Kiểm tra nếu có đường đi
+            if nx.has_path(dynamic_graph, source_shard, dest_shard):
+                path = nx.shortest_path(dynamic_graph, source=source_shard, target=dest_shard)
+                return path
+        except Exception as e:
+            print(f"Lỗi khi tìm dynamic mesh path: {e}")
+        
+        return []
+    
     def analyze_transaction_patterns(self, window_size: int = 100) -> Dict[str, Any]:
         """
         Phân tích mẫu giao dịch để tối ưu hóa định tuyến.

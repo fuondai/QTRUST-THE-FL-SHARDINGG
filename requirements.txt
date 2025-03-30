@@ -12,3 +12,5 @@ scikit-learn>=1.0.0
 pytest>=6.2.5
 wandb>=0.12.0
 seaborn>=0.11.0
+py-ecc>=6.0.0
+cryptography>=37.0.0

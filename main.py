@@ -61,6 +61,7 @@ from qtrust.utils.data_generation import (
     generate_transactions
 )
 from qtrust.federated.manager import FederatedLearningManager
+from qtrust.consensus.adaptive_pos import AdaptivePoSManager
 
 # Thiết lập ngẫu nhiên cho khả năng tái tạo
 SEED = 42
@@ -105,6 +106,15 @@ def parse_args():
                       choices=['none', 'ddos', '51_percent', 'sybil', 'eclipse'], 
                       help='Kịch bản tấn công cho mô phỏng')
     
+    # Tham số đồng thuận
+    parser.add_argument('--enable-bls', action='store_true', help='Bật BLS signature aggregation')
+    parser.add_argument('--enable-adaptive-pos', action='store_true', help='Enable Adaptive PoS with validator rotation')
+    parser.add_argument('--enable-lightweight-crypto', action='store_true', help='Enable lightweight cryptography for energy optimization')
+    parser.add_argument('--energy-optimization-level', type=str, choices=['low', 'balanced', 'aggressive'], default='balanced', 
+                       help='Energy optimization level (low, balanced, aggressive)')
+    parser.add_argument('--pos-rotation-period', type=int, default=50, help='Number of rounds before considering validator rotation')
+    parser.add_argument('--active-validator-ratio', type=float, default=0.7, help='Ratio of active validators (0.0-1.0)')
+    
     # Lưu trữ
     parser.add_argument('--save-dir', type=str, default='models/simulation', help='Thư mục lưu kết quả')
     parser.add_argument('--load-model', type=str, help='Đường dẫn tới mô hình để tiếp tục huấn luyện')
@@ -146,7 +156,13 @@ def setup_simulation(args):
         transaction_threshold_low=10.0,
         transaction_threshold_high=50.0,
         congestion_threshold=0.7,
-        min_trust_threshold=0.3
+        min_trust_threshold=0.3,
+        enable_bls=args.enable_bls,
+        num_validators_per_shard=args.nodes_per_shard,
+        enable_adaptive_pos=args.enable_adaptive_pos,
+        enable_lightweight_crypto=args.enable_lightweight_crypto,
+        active_validator_ratio=args.active_validator_ratio,
+        rotation_period=args.pos_rotation_period
     )
     
     return env, router, htdcm, ac_manager
@@ -483,166 +499,271 @@ def train_qtrust(env, agent, router, consensus, htdcm, fl_system, args):
     }
 
 def evaluate_qtrust(env, agent, router, consensus, htdcm, fl_system, args):
-    """Đánh giá hệ thống QTrust với mô hình đã huấn luyện."""
-    num_episodes = 5  # Số lượng episode đánh giá cố định
+    """
+    Đánh giá hiệu suất của mô hình.
     
-    print(f"Bắt đầu đánh giá hệ thống QTrust...")
+    Args:
+        env: Môi trường blockchain
+        agent: Agent DQN được huấn luyện
+        router: Router định tuyến giao dịch
+        consensus: Quản lý đồng thuận
+        htdcm: Cơ chế tin cậy
+        fl_system: Hệ thống federated learning
+        args: Tham số dòng lệnh
+        
+    Returns:
+        metrics: Các chỉ số hiệu suất
+    """
+    print("\nĐánh giá hiệu suất...")
     
+    # Thiết lập các biến theo dõi
     rewards = []
     throughputs = []
     latencies = []
-    energy_consumptions = []
-    security_levels = []
+    energies = []
+    securities = []
     cross_shard_ratios = []
+    consensus_success_rates = {}
+    protocol_usage = {}
     
-    # Tạo thanh tiến trình
-    progress_bar = tqdm(total=num_episodes, desc="Đánh giá Tiến trình")
+    # Thiết lập theo dõi cho số liệu giao thức
+    for protocol_name in ["FastBFT", "PBFT", "RobustBFT", "LightBFT"]:
+        consensus_success_rates[protocol_name] = []
+        protocol_usage[protocol_name] = 0
+        
+    # Thêm BLS nếu được kích hoạt
+    if args.enable_bls:
+        consensus_success_rates["BLS_Consensus"] = []
+        protocol_usage["BLS_Consensus"] = 0
     
-    for episode in range(num_episodes):
+    # Thiết lập theo dõi cho BLS metrics
+    bls_size_reductions = []
+    bls_verification_times = []
+    bls_verification_speedups = []
+    
+    # Theo dõi tấn công nếu có
+    attack_metrics = {}
+    
+    for episode in range(args.episodes):
         state = env.reset()
-        done = False
         episode_reward = 0
+        done = False
+        step = 0
+        
+        # Thống kê cho episode
+        episode_consensus_outcomes = {name: [] for name in consensus_success_rates.keys()}
+        episode_protocol_usage = {name: 0 for name in protocol_usage.keys()}
+        
+        episode_throughputs = []
         episode_latencies = []
-        episode_energy = 0
-        total_successful_txs = 0
-        episode_cross_shard_txs = 0
-        total_txs = 0
+        episode_energies = []
+        episode_securities = []
+        episode_cross_shard_ratios = []
         
-        # Khởi tạo lại các tham số cho episode mới
-        htdcm.reset()
-        if fl_system:
-            fl_system.reset()
-            
-        # Khởi tạo metrics cho episode
-        env.metrics = {
-            'latency': [],
-            'energy_consumption': [],
-            'security_score': []
-        }
+        # Mô phỏng kịch bản tấn công nếu được chọn
+        if args.attack_scenario != 'none':
+            env.simulate_attack(args.attack_scenario)
+            print(f"Mô phỏng tấn công: {args.attack_scenario}")
         
-        while not done:
-            # Lấy trạng thái mạng hiện tại - sử dụng get_state() thay vì get_network_state()
-            network_state = env.get_state()
-            shard_congestion = env.shard_congestion
-            node_trust_scores = htdcm.get_node_trust_scores()
+        while not done and step < args.max_steps:
+            action = agent.act(state, 0.01)  # Epsilon thấp cho đánh giá, ưu tiên khai thác
             
-            # Cập nhật router với thông tin mới
-            router.update_network_state(shard_congestion, node_trust_scores)
-            
-            # Sử dụng phương thức select_protocol mà không cần vòng lặp for
-            average_congestion = np.mean(shard_congestion) if isinstance(shard_congestion, np.ndarray) else 0.5
-            tx_value = random.uniform(0, 100)  # Giả lập giá trị giao dịch
-            protocol = consensus.select_protocol(
-                transaction_value=tx_value,
-                congestion=average_congestion,
-                trust_scores=node_trust_scores
-            )
-            
-            # Chọn hành động: sử dụng agent nếu có, ngược lại chọn ngẫu nhiên
-            if isinstance(state, np.ndarray) and len(state) != agent.state_size:
-                # Xử lý trường hợp kích thước state khác với mô hình
-                # Trích xuất các thông tin cần thiết và điều chỉnh kích thước
-                adapted_state = adapt_state_for_model(state, agent.state_size)
-                action = agent.act(adapted_state)
-            else:
-                action = agent.act(state)
-            
-            # Xử lý định tuyến giao dịch
-            txs_to_route = env.get_pending_transactions()
-            for tx in txs_to_route:
-                # Định tuyến giao dịch sử dụng router
-                source_shard = env.get_node_shard(tx['source'])
-                target_shard = env.get_node_shard(tx['target'])
-                
-                # Sử dụng router để tìm đường đi tốt nhất
-                if source_shard != target_shard:
-                    episode_cross_shard_txs += 1
-                    path = router.find_path(source_shard, target_shard, tx)
-                    tx['route'] = path
-            
-            # Cập nhật điểm tin cậy
-            tx_results = env.get_recent_transactions()
-            for tx_result in tx_results:
-                if tx_result['status'] == 'successful':
-                    # Tăng điểm tin cậy cho các node tham gia
-                    participating_nodes = tx_result.get('participating_nodes', [])
-                    for node in participating_nodes:
-                        htdcm.update_node_trust(node, 0.01, 0, True)  # Tăng nhẹ điểm tin cậy
-                else:
-                    # Giảm điểm tin cậy cho các node gây lỗi
-                    failing_nodes = tx_result.get('failing_nodes', [])
-                    for node in failing_nodes:
-                        htdcm.update_node_trust(node, -0.05, 0, True)  # Giảm đáng kể điểm tin cậy
-            
-            # Thực hiện bước mô phỏng với hành động đã chọn
+            # Triển khai hành động
             next_state, reward, done, info = env.step(action)
             
-            # Cập nhật thông tin
-            state = next_state
-            episode_reward += reward
+            # Cập nhật router và đồng thuận
+            tps = info.get('throughput', 0)
+            latency = info.get('avg_latency', 0)
+            energy = info.get('energy_consumption', 0)
+            security = info.get('security_level', 0)
+            cross_shard_ratio = info.get('cross_shard_transaction_ratio', 0)
             
-            # Thu thập metrics
-            if 'successful_txs' in info:
-                total_successful_txs += info['successful_txs']
-            if 'total_txs' in info:
-                total_txs += info['total_txs']
-            if 'latency' in info:
-                episode_latencies.append(info['latency'])
-            if 'energy' in info:
-                episode_energy += info['energy']
+            # Cập nhật consensus
+            trust_scores = htdcm.get_trust_scores()
+            congestion_levels = info.get('congestion_levels', {})
+            network_stability = info.get('network_stability', 0.5)
+            
+            # Cập nhật cơ chế đồng thuận
+            consensus_update = consensus.update_consensus_mechanism(
+                congestion_levels=congestion_levels,
+                trust_scores=trust_scores,
+                network_stability=network_stability,
+                cross_shard_ratio=cross_shard_ratio
+            )
+            
+            # Thu thập thống kê sử dụng giao thức
+            for shard_id, assignment in consensus_update.get('assignments', {}).items():
+                protocol = assignment.get('protocol')
+                if protocol in episode_protocol_usage:
+                    episode_protocol_usage[protocol] += 1
+            
+            # Thu thập số liệu hiệu suất giao thức
+            for protocol_name in episode_consensus_outcomes:
+                outcomes = info.get('consensus_outcomes', {}).get(protocol_name, [])
+                for outcome in outcomes:
+                    episode_consensus_outcomes[protocol_name].append(1 if outcome else 0)
+            
+            # Thu thập số liệu BLS nếu được kích hoạt
+            if args.enable_bls:
+                bls_metrics = consensus.get_bls_metrics()
+                if bls_metrics:
+                    bls_size_reductions.append(bls_metrics.get('avg_size_reduction_percent', 0))
+                    bls_verification_times.append(bls_metrics.get('avg_verification_time', 0))
+                    bls_verification_speedups.append(bls_metrics.get('verification_speedup', 0))
+            
+            # Cập nhật HTDCM với thông tin giao dịch mới
+            for transaction in info.get('processed_transactions', []):
+                htdcm.update_trust(
+                    node_id=transaction.get('validator_id', 0),
+                    transaction_success=transaction.get('success', False),
+                    transaction_value=transaction.get('value', 0)
+                )
+            
+            # Thu thập số liệu hiệu suất
+            episode_throughputs.append(tps)
+            episode_latencies.append(latency)
+            episode_energies.append(energy)
+            episode_securities.append(security)
+            episode_cross_shard_ratios.append(cross_shard_ratio)
+            
+            # Thu thập thông tin tấn công nếu có
+            if args.attack_scenario != 'none':
+                attack_info = info.get('attack_metrics', {})
+                for key, value in attack_info.items():
+                    if key not in attack_metrics:
+                        attack_metrics[key] = []
+                    attack_metrics[key].append(value)
+            
+            episode_reward += reward
+            state = next_state
+            step += 1
         
-        # Tính toán metrics
-        throughput = total_successful_txs / args.max_steps
-        cross_shard_ratio = (episode_cross_shard_txs / max(1, total_txs)) * 100 if total_txs > 0 else 0
-        
-        # Lưu metrics
+        # Tính trung bình cho episode này
         rewards.append(episode_reward)
-        throughputs.append(throughput)
         
-        if env.metrics['latency']:
-            avg_latency = np.mean(env.metrics['latency'])
-            latencies.append(avg_latency)
-        else:
-            latencies.append(np.mean(episode_latencies) if episode_latencies else 0)
+        avg_throughput = sum(episode_throughputs) / len(episode_throughputs) if episode_throughputs else 0
+        throughputs.append(avg_throughput)
         
-        if env.metrics['energy_consumption']:
-            avg_energy = np.mean(env.metrics['energy_consumption'])
-            energy_consumptions.append(avg_energy)
-        else:
-            energy_consumptions.append(episode_energy / max(1, total_successful_txs))
+        avg_latency = sum(episode_latencies) / len(episode_latencies) if episode_latencies else 0
+        latencies.append(avg_latency)
         
-        if env.metrics['security_score']:
-            avg_security = np.mean(env.metrics['security_score'])
-            security_levels.append(avg_security)
-        else:
-            # Tính mức độ bảo mật dựa trên điểm tin cậy trung bình của mạng
-            trust_scores = list(htdcm.get_node_trust_scores().values())
-            security_level = np.mean(trust_scores) if trust_scores else 0
-            security_levels.append(security_level)
+        avg_energy = sum(episode_energies) / len(episode_energies) if episode_energies else 0
+        energies.append(avg_energy)
         
-        cross_shard_ratios.append(cross_shard_ratio)
+        avg_security = sum(episode_securities) / len(episode_securities) if episode_securities else 0
+        securities.append(avg_security)
         
-        print(f"Đánh giá Episode {episode+1}/{num_episodes} - "
-              f"Reward: {episode_reward:.2f}, "
-              f"Throughput: {throughput:.2f} tx/s, "
-              f"Latency: {avg_latency:.2f} ms, "
-              f"Energy: {energy_consumptions[-1]:.2f} mJ/tx, "
-              f"Security: {security_levels[-1]:.4f}, "
-              f"Cross-Shard Ratio: {cross_shard_ratio:.2f}")
+        avg_cross_shard = sum(episode_cross_shard_ratios) / len(episode_cross_shard_ratios) if episode_cross_shard_ratios else 0
+        cross_shard_ratios.append(avg_cross_shard)
         
-        progress_bar.update(1)
+        # Tính tỷ lệ thành công cho mỗi giao thức
+        for protocol_name, outcomes in episode_consensus_outcomes.items():
+            if outcomes:
+                success_rate = sum(outcomes) / len(outcomes)
+                consensus_success_rates[protocol_name].append(success_rate)
+        
+        # Cập nhật thống kê sử dụng giao thức
+        for protocol_name, count in episode_protocol_usage.items():
+            protocol_usage[protocol_name] += count
+            
+        # In thông tin về episode
+        print(f"Episode {episode+1}/{args.episodes}:")
+        print(f"  Phần thưởng: {episode_reward:.2f}")
+        print(f"  Throughput: {avg_throughput:.2f} tx/s, Độ trễ: {avg_latency:.2f} ms")
+        print(f"  Năng lượng: {avg_energy:.2f}, Bảo mật: {avg_security:.2f}")
+        print(f"  Tỷ lệ xuyên shard: {avg_cross_shard:.2f}")
     
-    progress_bar.close()
+    # Tính toán các chỉ số trung bình
+    avg_reward = sum(rewards) / len(rewards) if rewards else 0
+    avg_throughput = sum(throughputs) / len(throughputs) if throughputs else 0
+    avg_latency = sum(latencies) / len(latencies) if latencies else 0
+    avg_energy = sum(energies) / len(energies) if energies else 0
+    avg_security = sum(securities) / len(securities) if securities else 0
+    avg_cross_shard_ratio = sum(cross_shard_ratios) / len(cross_shard_ratios) if cross_shard_ratios else 0
     
-    # Tổng hợp kết quả
+    # Tính toán tỷ lệ thành công trung bình cho mỗi giao thức
+    avg_consensus_success_rates = {}
+    for protocol_name, rates in consensus_success_rates.items():
+        if rates:
+            avg_consensus_success_rates[protocol_name] = sum(rates) / len(rates)
+        else:
+            avg_consensus_success_rates[protocol_name] = 0
+    
+    # Tính toán BLS metrics
+    bls_metrics = {}
+    if args.enable_bls and bls_size_reductions and bls_verification_times and bls_verification_speedups:
+        bls_metrics = {
+            'avg_size_reduction_percent': sum(bls_size_reductions) / len(bls_size_reductions),
+            'avg_verification_time': sum(bls_verification_times) / len(bls_verification_times),
+            'avg_verification_speedup': sum(bls_verification_speedups) / len(bls_verification_speedups)
+        }
+    
+    # Tính toán phân phối sử dụng giao thức
+    total_protocol_usage = sum(protocol_usage.values())
+    protocol_distribution = {}
+    if total_protocol_usage > 0:
+        for protocol_name, count in protocol_usage.items():
+            protocol_distribution[protocol_name] = count / total_protocol_usage
+    
+    # Tính toán các chỉ số tấn công nếu có
+    avg_attack_metrics = {}
+    if attack_metrics:
+        for key, values in attack_metrics.items():
+            if values:
+                avg_attack_metrics[key] = sum(values) / len(values)
+    
+    # In kết quả tổng hợp
+    print("\nKết quả đánh giá:")
+    print(f"Phần thưởng trung bình: {avg_reward:.2f}")
+    print(f"Throughput trung bình: {avg_throughput:.2f} tx/s")
+    print(f"Độ trễ trung bình: {avg_latency:.2f} ms")
+    print(f"Tiêu thụ năng lượng trung bình: {avg_energy:.2f}")
+    print(f"Mức độ bảo mật trung bình: {avg_security:.2f}")
+    print(f"Tỷ lệ giao dịch xuyên shard: {avg_cross_shard_ratio:.2f}")
+    
+    print("\nHiệu suất giao thức đồng thuận:")
+    for protocol_name, success_rate in avg_consensus_success_rates.items():
+        usage_percent = protocol_distribution.get(protocol_name, 0) * 100
+        print(f"  {protocol_name}: Tỷ lệ thành công = {success_rate:.2f}, Sử dụng = {usage_percent:.1f}%")
+    
+    # In BLS metrics nếu có
+    if bls_metrics:
+        print("\nHiệu suất BLS Signature Aggregation:")
+        print(f"  Giảm kích thước: {bls_metrics['avg_size_reduction_percent']:.2f}%")
+        print(f"  Thời gian xác minh: {bls_metrics['avg_verification_time']*1000:.2f} ms")
+        print(f"  Tăng tốc xác minh: {bls_metrics['avg_verification_speedup']:.2f}x")
+    
+    # In thông tin tấn công nếu có
+    if avg_attack_metrics:
+        print("\nChỉ số tấn công:")
+        for key, value in avg_attack_metrics.items():
+            print(f"  {key}: {value:.4f}")
+    
+    # Trả về tất cả các chỉ số
     metrics = {
         'rewards': rewards,
         'throughputs': throughputs,
         'latencies': latencies,
-        'energy_consumptions': energy_consumptions,
-        'security_levels': security_levels,
-        'cross_shard_ratios': cross_shard_ratios
+        'energies': energies,
+        'securities': securities,
+        'cross_shard_ratios': cross_shard_ratios,
+        'avg_reward': avg_reward,
+        'avg_throughput': avg_throughput,
+        'avg_latency': avg_latency,
+        'avg_energy': avg_energy,
+        'avg_security': avg_security,
+        'avg_cross_shard_ratio': avg_cross_shard_ratio,
+        'avg_consensus_success_rates': avg_consensus_success_rates,
+        'protocol_distribution': protocol_distribution
     }
+    
+    # Thêm BLS metrics nếu có
+    if bls_metrics:
+        metrics['bls_metrics'] = bls_metrics
+    
+    # Thêm thông tin tấn công nếu có
+    if avg_attack_metrics:
+        metrics['attack_metrics'] = avg_attack_metrics
     
     return metrics
 
@@ -720,15 +841,15 @@ def plot_results(metrics, args, mode='train'):
                 smoothed = np.convolve(metrics['latencies'], np.ones(window_size)/window_size, mode='valid')
                 ax2.plot(range(window_size-1, len(metrics['latencies'])), smoothed, color='darkred')
         
-        if 'energy_consumptions' in metrics and len(metrics['energy_consumptions']) > 0:
+        if 'energies' in metrics and len(metrics['energies']) > 0:
             ax3 = plt.subplot(3, 1, 3)
-            ax3.plot(metrics['energy_consumptions'], color='orange', alpha=0.6)
+            ax3.plot(metrics['energies'], color='orange', alpha=0.6)
             ax3.set_title('Energy Consumption (mJ/tx)')
             ax3.grid(alpha=0.3)
             
-            if len(metrics['energy_consumptions']) > 1:
-                smoothed = np.convolve(metrics['energy_consumptions'], np.ones(window_size)/window_size, mode='valid')
-                ax3.plot(range(window_size-1, len(metrics['energy_consumptions'])), smoothed, color='darkorange')
+            if len(metrics['energies']) > 1:
+                smoothed = np.convolve(metrics['energies'], np.ones(window_size)/window_size, mode='valid')
+                ax3.plot(range(window_size-1, len(metrics['energies'])), smoothed, color='darkorange')
         
         plt.tight_layout()
         plt.savefig(os.path.join(plots_dir, f'{mode}_performance.png'), dpi=300, bbox_inches='tight')
@@ -736,16 +857,16 @@ def plot_results(metrics, args, mode='train'):
         # 3. Biểu đồ Security và Cross-shard ratio
         plt.figure(figsize=(10, 8))
         
-        if 'security_levels' in metrics and len(metrics['security_levels']) > 0:
+        if 'securities' in metrics and len(metrics['securities']) > 0:
             ax1 = plt.subplot(2, 1, 1)
-            ax1.plot(metrics['security_levels'], color='purple', alpha=0.6)
+            ax1.plot(metrics['securities'], color='purple', alpha=0.6)
             ax1.set_title('Security Score')
             ax1.set_ylim([0, 1])
             ax1.grid(alpha=0.3)
             
-            if len(metrics['security_levels']) > 1:
-                smoothed = np.convolve(metrics['security_levels'], np.ones(window_size)/window_size, mode='valid')
-                ax1.plot(range(window_size-1, len(metrics['security_levels'])), smoothed, color='purple')
+            if len(metrics['securities']) > 1:
+                smoothed = np.convolve(metrics['securities'], np.ones(window_size)/window_size, mode='valid')
+                ax1.plot(range(window_size-1, len(metrics['securities'])), smoothed, color='purple')
         
         if 'cross_shard_ratios' in metrics and len(metrics['cross_shard_ratios']) > 0:
             ax2 = plt.subplot(2, 1, 2)
@@ -821,7 +942,29 @@ def create_blockchain_network(num_shards, nodes_per_shard):
     return G, node_to_shard, shards
 
 def main():
+    """
+    Điểm vào chính của chương trình.
+    """
     args = parse_args()
+    
+    print(f"\n{'=' * 60}")
+    print(f"QTrust: Blockchain Sharding tối ưu hóa với Deep Reinforcement Learning")
+    print(f"{'=' * 60}\n")
+    
+    # In thông số mô phỏng
+    print(f"Số lượng shard: {args.num_shards}")
+    print(f"Số node mỗi shard: {args.nodes_per_shard}")
+    if args.enable_bls:
+        print(f"BLS Signature Aggregation: Được kích hoạt")
+    if args.enable_adaptive_pos:
+        print(f"Adaptive PoS: Được kích hoạt")
+        print(f"  - Tỷ lệ validator hoạt động: {args.active_validator_ratio}")
+        print(f"  - Chu kỳ rotation: {args.pos_rotation_period} rounds")
+    if args.enable_lightweight_crypto:
+        print(f"Lightweight Cryptography: Được kích hoạt")
+        print(f"  - Mức tối ưu hóa năng lượng: {args.energy_optimization_level}")
+    print(f"Số bước mỗi episode: {args.max_steps}")
+    print(f"Số episode: {args.episodes}")
     
     # Tạo thư mục cho kết quả
     os.makedirs(args.save_dir, exist_ok=True)
@@ -866,7 +1009,13 @@ def main():
         transaction_threshold_low=10.0,
         transaction_threshold_high=50.0,
         congestion_threshold=0.7,
-        min_trust_threshold=0.3
+        min_trust_threshold=0.3,
+        enable_bls=args.enable_bls,
+        num_validators_per_shard=args.nodes_per_shard,
+        enable_adaptive_pos=args.enable_adaptive_pos,
+        enable_lightweight_crypto=args.enable_lightweight_crypto,
+        active_validator_ratio=args.active_validator_ratio,
+        rotation_period=args.pos_rotation_period
     )
     
     # Khởi tạo Federated Learning (FL)
@@ -958,6 +1107,19 @@ def main():
         
         agent_wrapper = DQNAgentWrapper(dqn_agent, args.num_shards)
     
+    # Khởi tạo AdaptivePoSManager cho mỗi shard nếu được bật
+    if args.enable_adaptive_pos:
+        print("Khởi tạo Adaptive PoS cho mỗi shard...")
+        for shard_id in range(args.num_shards):
+            ac_manager.pos_managers[shard_id] = AdaptivePoSManager(
+                num_validators=args.nodes_per_shard,
+                active_validator_ratio=args.active_validator_ratio,
+                rotation_period=args.pos_rotation_period,
+                energy_optimization_level=args.energy_optimization_level,
+                enable_smart_energy_management=True
+            )
+        print(f"Đã khởi tạo {args.num_shards} PoS managers với {args.nodes_per_shard} validators mỗi shard")
+
     # Tiến hành các episode
     for episode in range(total_episodes):
         print(f"\nEpisode {episode+1}/{total_episodes}")
@@ -993,6 +1155,19 @@ def main():
                     congestion=average_congestion,
                     trust_scores=node_trust_scores
                 )
+                
+                # In thông tin về protocol đã chọn nếu đang bật tối ưu năng lượng
+                if (args.enable_adaptive_pos or args.enable_lightweight_crypto or args.enable_bls) and step % 10 == 0:
+                    print(f"\nStep {step}: Đã chọn protocol '{protocol}' cho giao dịch {tx_value:.2f} with congestion {average_congestion:.2f}")
+                    if args.enable_lightweight_crypto:
+                        crypto_stats = ac_manager.crypto_manager.get_crypto_statistics() if hasattr(ac_manager, 'crypto_manager') else None
+                        if crypto_stats:
+                            print(f"  Lightweight Crypto - Security level: {crypto_stats['usage_ratios']}")
+                    if args.enable_adaptive_pos and step % 50 == 0:
+                        for shard_id, pos_manager in ac_manager.pos_managers.items():
+                            energy_saved = pos_manager.energy_saved
+                            rotations = pos_manager.total_rotations
+                            print(f"  Shard {shard_id}: Energy saved: {energy_saved:.2f} mJ, Rotations: {rotations}")
                 
                 # Chọn hành động: sử dụng agent nếu có, ngược lại chọn ngẫu nhiên
                 if agent_wrapper:
@@ -1106,28 +1281,9 @@ def main():
     print(f"Security trung bình: {np.mean(all_security_levels):.2f} ± {np.std(all_security_levels):.2f}")
     print(f"Cross-shard ratio: {np.mean(all_cross_shard_ratios):.2f} ± {np.std(all_cross_shard_ratios):.2f}")
     
-    # Lưu kết quả
-    results = {
-        'rewards': all_rewards,
-        'throughputs': all_throughputs,
-        'latencies': all_latencies,
-        'energy_consumptions': all_energy_consumptions,
-        'security_levels': all_security_levels,
-        'cross_shard_ratios': all_cross_shard_ratios
-    }
-    
-    # Lưu kết quả vào file
-    with open(os.path.join(args.save_dir, 'simulation_results.txt'), 'w', encoding='utf-8') as f:
-        f.write(f"=== KẾT QUẢ MÔ PHỎNG Q-TRUST ===\n")
-        f.write(f"Số shards: {args.num_shards}\n")
-        f.write(f"Số nodes/shard: {args.nodes_per_shard}\n")
-        f.write(f"Số episodes: {total_episodes}\n")
-        if args.attack_scenario != 'none':
-            f.write(f"Kịch bản tấn công: {args.attack_scenario.upper()}\n")
-        if args.model_path:
-            f.write(f"Mô hình DQN: {args.model_path}\n")
-        f.write("\n")
-        
+    # Lưu kết quả ra file
+    with open(os.path.join(args.save_dir, 'summary.txt'), 'w', encoding='utf-8') as f:
+        f.write(f"=== KẾT QUẢ TỔNG KẾT ===\n")
         f.write(f"Reward trung bình: {np.mean(all_rewards):.2f} ± {np.std(all_rewards):.2f}\n")
         f.write(f"Throughput trung bình: {np.mean(all_throughputs):.2f} tx/s ± {np.std(all_throughputs):.2f}\n")
         f.write(f"Latency trung bình: {np.mean(all_latencies):.2f} ms ± {np.std(all_latencies):.2f}\n")
@@ -1135,14 +1291,34 @@ def main():
         f.write(f"Security trung bình: {np.mean(all_security_levels):.2f} ± {np.std(all_security_levels):.2f}\n")
         f.write(f"Cross-shard ratio: {np.mean(all_cross_shard_ratios):.2f} ± {np.std(all_cross_shard_ratios):.2f}\n")
     
-    print(f"Đã lưu kết quả vào {args.save_dir}/simulation_results.txt")
+    print(f"Đã lưu kết quả vào {args.save_dir}/summary.txt")
     
     # Vẽ biểu đồ kết quả nếu có nhiều hơn 1 episode
     if total_episodes > 1:
-        plot_results(results, args)
+        plot_results({'rewards': all_rewards, 'throughputs': all_throughputs, 'latencies': all_latencies, 'energies': all_energy_consumptions, 'securities': all_security_levels, 'cross_shard_ratios': all_cross_shard_ratios}, args)
         print(f"Đã lưu biểu đồ kết quả vào thư mục {args.save_dir}")
     
     print("\nHoàn thành mô phỏng!")
+
+    # Hiển thị thống kê tối ưu hóa năng lượng nếu được bật
+    if args.enable_adaptive_pos or args.enable_lightweight_crypto or args.enable_bls:
+        print("\n=== Thống kê tối ưu hóa năng lượng ===")
+        energy_stats = ac_manager.get_optimization_statistics()
+        print(f"Tổng năng lượng tiết kiệm: {energy_stats['total_energy_saved']:.2f} mJ")
+        
+        if args.enable_adaptive_pos:
+            pos_stats = energy_stats['adaptive_pos']
+            print(f"Adaptive PoS: {pos_stats['total_energy_saved']:.2f} mJ đã tiết kiệm, {pos_stats['total_rotations']} lần luân chuyển")
+            
+        if args.enable_lightweight_crypto:
+            lwc_stats = energy_stats['lightweight_crypto']
+            print(f"Lightweight Crypto: {lwc_stats['total_energy_saved']:.2f} mJ đã tiết kiệm, {lwc_stats['total_operations']} hoạt động")
+            print(f"Phân bố mức bảo mật: {lwc_stats['security_distribution']}")
+            
+        if args.enable_bls and 'bls_signature_aggregation' in energy_stats:
+            bls_stats = energy_stats['bls_signature_aggregation']['metrics']
+            print(f"BLS Signature Aggregation: {bls_stats['avg_size_reduction_percent']:.2f}% giảm kích thước")
+            print(f"Tăng tốc xác minh: {bls_stats['verification_speedup']:.2f}x")
 
 if __name__ == "__main__":
     main() 
