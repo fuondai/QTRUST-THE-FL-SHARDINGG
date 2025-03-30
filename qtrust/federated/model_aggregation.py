@@ -44,14 +44,11 @@ class OptimizedAggregator:
         # Khởi tạo tham số kết quả từ client đầu tiên
         result_params = copy.deepcopy(params_list[0])
         
-        # Thực hiện tổng hợp với trọng số đã chuẩn hóa
-        for key in result_params.keys():
-            # Khởi tạo tensor kết quả với giá trị 0
+        # Thực hiện tổng hợp có trọng số
+        for key in result_params:
             result_params[key] = torch.zeros_like(result_params[key])
-            
-            # Cộng tham số từ mỗi client với trọng số tương ứng
-            for client_idx, client_params in enumerate(params_list):
-                result_params[key] += normalized_weights[client_idx] * client_params[key]
+            for i, params in enumerate(params_list):
+                result_params[key] += normalized_weights[i] * params[key]
                 
         return result_params
     
@@ -254,7 +251,7 @@ class OptimizedAggregator:
 
 class ModelAggregationManager:
     """
-    Quản lý việc tổng hợp mô hình với nhiều phương pháp khác nhau.
+    Quản lý việc tổng hợp mô hình với các phương pháp tối ưu.
     """
     def __init__(self, default_method: str = 'weighted_average'):
         """
@@ -263,74 +260,155 @@ class ModelAggregationManager:
         Args:
             default_method: Phương pháp tổng hợp mặc định
         """
-        self.aggregator = OptimizedAggregator()
         self.default_method = default_method
-        self.supported_methods = {
-            'weighted_average': self.aggregator.weighted_average,
-            'median': self.aggregator.median,
-            'trimmed_mean': self.aggregator.trimmed_mean,
-            'krum': self.aggregator.krum,
-            'adaptive_fedavg': self.aggregator.adaptive_federated_averaging,
-            'fedprox': self.aggregator.fedprox
-        }
+        self.aggregator = OptimizedAggregator()
         
-    def aggregate(self, method: str, params_list: List[Dict[str, torch.Tensor]], **kwargs) -> Dict[str, torch.Tensor]:
-        """
-        Tổng hợp mô hình sử dụng phương pháp đã chọn.
+        # Lưu trữ thông tin về các phiên tổng hợp
+        self.session_history = []
+        self.performance_metrics = {}
         
-        Args:
-            method: Tên phương pháp tổng hợp
-            params_list: Danh sách các từ điển tham số mô hình từ các client
-            **kwargs: Các tham số bổ sung cho phương pháp tổng hợp
-            
-        Returns:
-            Dict: Tham số mô hình đã tổng hợp
-        """
-        if method not in self.supported_methods:
-            print(f"Phương pháp {method} không được hỗ trợ, sử dụng {self.default_method}")
-            method = self.default_method
-            
-        aggregation_func = self.supported_methods[method]
-        
-        try:
-            result = aggregation_func(params_list, **kwargs)
-            return result
-        except Exception as e:
-            print(f"Lỗi khi tổng hợp mô hình với phương pháp {method}: {e}")
-            # Fallback về phương pháp mặc định nếu có lỗi
-            if method != self.default_method:
-                print(f"Sử dụng phương pháp {self.default_method} thay thế")
-                kwargs_for_default = {}
-                if self.default_method == 'weighted_average' and 'weights' in kwargs:
-                    kwargs_for_default = {'weights': kwargs['weights']}
-                return self.supported_methods[self.default_method](params_list, **kwargs_for_default)
-            raise
-    
     def recommend_method(self, 
-                       num_clients: int, 
-                       has_trust_scores: bool = False, 
-                       suspected_byzantine: bool = False) -> str:
+                        num_clients: int,
+                        has_trust_scores: bool = False,
+                        suspected_byzantine: bool = False) -> str:
         """
-        Đề xuất phương pháp tổng hợp tốt nhất dựa trên số lượng client và dữ liệu có sẵn.
+        Đề xuất phương pháp tổng hợp tốt nhất dựa trên điều kiện hiện tại.
         
         Args:
-            num_clients: Số lượng client tham gia tổng hợp
-            has_trust_scores: Có dữ liệu về điểm tin cậy hay không
-            suspected_byzantine: Có nghi ngờ client Byzantine hay không
+            num_clients: Số lượng client tham gia
+            has_trust_scores: Có điểm tin cậy hay không
+            suspected_byzantine: Nghi ngờ có client Byzantine
             
         Returns:
             str: Tên phương pháp tổng hợp được đề xuất
         """
         if suspected_byzantine:
-            if num_clients >= 7:  # Krum cần ít nhất 2f+3 client, với f là số client Byzantine
-                return 'krum'
+            if num_clients >= 4:
+                return 'median'  # Robust với Byzantine
             else:
-                return 'trimmed_mean'
+                return 'trimmed_mean'  # Ít client hơn nhưng vẫn robust
         
         if has_trust_scores:
-            return 'adaptive_fedavg'
+            return 'adaptive_fedavg'  # Sử dụng điểm tin cậy
+            
+        if num_clients >= 10:
+            return 'weighted_average'  # Hiệu quả với nhiều client
+            
+        return self.default_method
+    
+    def aggregate(self, 
+                 method: str,
+                 params_list: List[Dict[str, torch.Tensor]],
+                 **kwargs) -> Dict[str, torch.Tensor]:
+        """
+        Thực hiện tổng hợp mô hình với phương pháp đã chọn.
         
-        if num_clients < 5:
-            return 'weighted_average'
+        Args:
+            method: Tên phương pháp tổng hợp
+            params_list: Danh sách tham số mô hình từ các client
+            **kwargs: Các tham số bổ sung (weights, trust_scores, etc.)
+            
+        Returns:
+            Dict: Tham số mô hình đã tổng hợp
+        """
+        if method == 'weighted_average':
+            weights = kwargs.get('weights', [1.0/len(params_list)] * len(params_list))
+            return self.aggregator.weighted_average(params_list, weights)
+            
+        elif method == 'adaptive_fedavg':
+            # Kết hợp điểm tin cậy và hiệu suất
+            trust_scores = kwargs.get('trust_scores', [1.0] * len(params_list))
+            performance_scores = kwargs.get('performance_scores', [1.0] * len(params_list))
+            
+            # Tính trọng số kết hợp
+            combined_weights = []
+            for trust, perf in zip(trust_scores, performance_scores):
+                weight = 0.7 * trust + 0.3 * perf  # 70% trust, 30% performance
+                combined_weights.append(weight)
+                
+            return self.aggregator.weighted_average(params_list, combined_weights)
+            
+        elif method == 'median':
+            # Sử dụng median cho từng tham số
+            result_params = copy.deepcopy(params_list[0])
+            for key in result_params:
+                stacked_params = torch.stack([p[key] for p in params_list])
+                result_params[key] = torch.median(stacked_params, dim=0)[0]
+            return result_params
+            
+        elif method == 'trimmed_mean':
+            # Loại bỏ outliers và tính trung bình
+            trim_ratio = kwargs.get('trim_ratio', 0.2)
+            result_params = copy.deepcopy(params_list[0])
+            
+            for key in result_params:
+                stacked_params = torch.stack([p[key] for p in params_list])
+                k = int(len(params_list) * trim_ratio)
+                if k > 0:
+                    sorted_values, _ = torch.sort(stacked_params, dim=0)
+                    trimmed_values = sorted_values[k:-k] if len(sorted_values) > 2*k else sorted_values
+                    result_params[key] = torch.mean(trimmed_values, dim=0)
+                else:
+                    result_params[key] = torch.mean(stacked_params, dim=0)
+            return result_params
+            
+        elif method == 'fedprox':
+            # FedProx với regularization
+            global_params = kwargs.get('global_params', None)
+            mu = kwargs.get('mu', 0.01)
+            
+            if global_params is None:
+                return self.aggregator.weighted_average(params_list, [1.0/len(params_list)] * len(params_list))
+                
+            # Tính trung bình có trọng số với regularization
+            weights = kwargs.get('weights', [1.0/len(params_list)] * len(params_list))
+            result_params = self.aggregator.weighted_average(params_list, weights)
+            
+            # Thêm regularization term
+            for key in result_params:
+                result_params[key] = (1 - mu) * result_params[key] + mu * global_params[key]
+                
+            return result_params
         
-        return 'fedprox' 
+        else:
+            raise ValueError(f"Phương pháp tổng hợp không hợp lệ: {method}")
+    
+    def update_performance_metrics(self, 
+                                method: str,
+                                metrics: Dict[str, float]) -> None:
+        """
+        Cập nhật metrics hiệu suất cho phương pháp tổng hợp.
+        
+        Args:
+            method: Tên phương pháp
+            metrics: Dictionary chứa các metrics
+        """
+        if method not in self.performance_metrics:
+            self.performance_metrics[method] = []
+        self.performance_metrics[method].append(metrics)
+        
+        # Giới hạn kích thước lịch sử
+        if len(self.performance_metrics[method]) > 100:
+            self.performance_metrics[method].pop(0)
+    
+    def get_best_method(self) -> str:
+        """
+        Lấy phương pháp tổng hợp có hiệu suất tốt nhất dựa trên lịch sử.
+        
+        Returns:
+            str: Tên phương pháp tốt nhất
+        """
+        if not self.performance_metrics:
+            return self.default_method
+            
+        # Tính điểm trung bình cho mỗi phương pháp
+        avg_scores = {}
+        for method, metrics_list in self.performance_metrics.items():
+            if metrics_list:
+                # Ưu tiên các metrics gần đây hơn
+                recent_metrics = metrics_list[-10:]  # 10 lần gần nhất
+                scores = [m.get('score', 0) for m in recent_metrics]
+                avg_scores[method] = np.mean(scores) if scores else 0
+                
+        # Chọn phương pháp có điểm cao nhất
+        return max(avg_scores.items(), key=lambda x: x[1])[0] if avg_scores else self.default_method 

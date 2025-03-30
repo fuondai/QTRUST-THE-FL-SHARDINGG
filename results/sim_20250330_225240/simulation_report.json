@@ -1,0 +1,100 @@
+{
+    "configuration": {
+        "num_shards": 5,
+        "nodes_per_shard": 10,
+        "malicious_percentage": 10,
+        "attack_scenario": null,
+        "attack_types": []
+    },
+    "performance": {
+        "throughput": 9.15,
+        "latency": 10.236338797814216,
+        "energy": 2.016373072161457,
+        "security": 0.16288143599117638,
+        "cross_shard_ratio": 0.30601092896174864,
+        "transaction_success_rate": 0.915,
+        "network_stability": 0.4722803513106286,
+        "resource_utilization": 0.019769415699078634,
+        "consensus_efficiency": 0.9897636612021857,
+        "shard_health": 0.7956841053931887,
+        "network_resilience": 0.14659329239205876
+    },
+    "shard_statistics": {
+        "shard_0": {
+            "num_nodes": 10,
+            "malicious_nodes": 1,
+            "congestion_level": 0.04,
+            "network_stability": 0.5364499704402245,
+            "resource_utilization": 0.01916559632015169,
+            "transactions_processed": 35,
+            "transactions_blocked": 5,
+            "health_score": 0.8089349911320673
+        },
+        "shard_1": {
+            "num_nodes": 10,
+            "malicious_nodes": 1,
+            "congestion_level": 0.01,
+            "network_stability": 0.6146647114224123,
+            "resource_utilization": 0.027917310033108093,
+            "transactions_processed": 38,
+            "transactions_blocked": 3,
+            "health_score": 0.8413994134267238
+        },
+        "shard_2": {
+            "num_nodes": 10,
+            "malicious_nodes": 1,
+            "congestion_level": 0.02,
+            "network_stability": 0.2317948441491049,
+            "resource_utilization": 0.017987197164758398,
+            "transactions_processed": 33,
+            "transactions_blocked": 5,
+            "health_score": 0.7235384532447315
+        },
+        "shard_3": {
+            "num_nodes": 10,
+            "malicious_nodes": 1,
+            "congestion_level": 0.02,
+            "network_stability": 0.507156355283073,
+            "resource_utilization": 0.02032405203903589,
+            "transactions_processed": 45,
+            "transactions_blocked": 1,
+            "health_score": 0.8061469065849219
+        },
+        "shard_4": {
+            "num_nodes": 10,
+            "malicious_nodes": 1,
+            "congestion_level": 0.01,
+            "network_stability": 0.4713358752583283,
+            "resource_utilization": 0.013452922938339102,
+            "transactions_processed": 32,
+            "transactions_blocked": 3,
+            "health_score": 0.7984007625774985
+        }
+    },
+    "pipeline_stats": {
+        "validation": 200,
+        "routing": 200,
+        "consensus": 200,
+        "execution": 185,
+        "commit": 183
+    },
+    "pipeline_performance": {
+        "pipeline_throughput": 9.15,
+        "stage_efficiency": {
+            "validation": 1.0,
+            "routing": 1.0,
+            "consensus": 1.0,
+            "execution": 0.925,
+            "commit": 0.915
+        },
+        "bottleneck_stage": "commit",
+        "parallel_efficiency": 0.7017543859649124,
+        "total_transactions": {
+            "validation": 200,
+            "routing": 200,
+            "consensus": 200,
+            "execution": 185,
+            "commit": 183
+        }
+    }
+}

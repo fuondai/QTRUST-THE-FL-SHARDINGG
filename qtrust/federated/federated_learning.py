@@ -7,6 +7,8 @@ from collections import defaultdict
 import copy
 import math
 import random
+from .model_aggregation import ModelAggregationManager
+from .privacy import PrivacyManager, SecureAggregator
 
 class FederatedModel(nn.Module):
     """
@@ -152,19 +154,29 @@ class FederatedLearning:
                  min_samples_per_client: int = 10,
                  device: str = 'cpu',
                  personalized: bool = False,
-                 personalization_alpha: float = 0.3):
+                 personalization_alpha: float = 0.3,
+                 optimized_aggregation: bool = True,
+                 privacy_preserving: bool = True,
+                 privacy_epsilon: float = 1.0,
+                 privacy_delta: float = 1e-5,
+                 secure_aggregation: bool = True):
         """
         Khởi tạo hệ thống Federated Learning.
         
         Args:
             global_model: Mô hình PyTorch toàn cục
-            aggregation_method: Phương pháp tổng hợp ('fedavg', 'fedtrust', 'fedadam')
+            aggregation_method: Phương pháp tổng hợp ('fedavg', 'fedtrust', 'fedadam', 'auto')
             client_selection_method: Phương pháp chọn client ('random', 'trust_based', 'performance_based')
             min_clients_per_round: Số lượng client tối thiểu cần thiết cho mỗi vòng
             min_samples_per_client: Số lượng mẫu tối thiểu mỗi client cần có
             device: Thiết bị sử dụng
             personalized: Có sử dụng cá nhân hóa cho mỗi client hay không 
             personalization_alpha: Trọng số cho cá nhân hóa (0-1)
+            optimized_aggregation: Sử dụng tối ưu hóa tổng hợp mô hình
+            privacy_preserving: Bật tính năng bảo vệ quyền riêng tư
+            privacy_epsilon: Privacy budget (epsilon)
+            privacy_delta: Xác suất thất bại (delta)
+            secure_aggregation: Bật tính năng tổng hợp an toàn
         """
         self.global_model = global_model.to(device)
         self.aggregation_method = aggregation_method
@@ -185,13 +197,37 @@ class FederatedLearning:
         self.global_val_loss = []
         self.round_metrics = []
         
-        # Tham số cho FedAdam
-        self.adam_m = None
-        self.adam_v = None
-        self.adam_beta1 = 0.9
-        self.adam_beta2 = 0.999
-        self.adam_eps = 1e-8
-        self.adam_lr = 0.01
+        # Khởi tạo ModelAggregationManager
+        self.aggregation_manager = ModelAggregationManager(
+            default_method='weighted_average' if aggregation_method == 'fedavg' else aggregation_method
+        )
+        
+        # Ánh xạ tên phương pháp cũ sang tên phương pháp mới
+        self.method_mapping = {
+            'fedavg': 'weighted_average',
+            'fedtrust': 'adaptive_fedavg',
+            'fedadam': 'fedprox',
+            'auto': 'auto'
+        }
+        
+        # Khởi tạo PrivacyManager và SecureAggregator nếu được yêu cầu
+        self.privacy_preserving = privacy_preserving
+        if privacy_preserving:
+            self.privacy_manager = PrivacyManager(
+                epsilon=privacy_epsilon,
+                delta=privacy_delta
+            )
+            
+            if secure_aggregation:
+                self.secure_aggregator = SecureAggregator(
+                    privacy_manager=self.privacy_manager,
+                    threshold=min_clients_per_round
+                )
+            else:
+                self.secure_aggregator = None
+        else:
+            self.privacy_manager = None
+            self.secure_aggregator = None
     
     def add_client(self, client: FederatedClient):
         """
@@ -256,127 +292,6 @@ class FederatedLearning:
         
         return selected_clients
     
-    def _aggregate_fedavg(self, client_updates) -> Dict[str, torch.Tensor]:
-        """
-        Tổng hợp cập nhật mô hình từ các client sử dụng FedAvg.
-        
-        Args:
-            client_updates: Dictionary chứa cập nhật từ mỗi client
-            
-        Returns:
-            Dict: Tham số mô hình đã được tổng hợp
-        """
-        # Lấy tham số và số mẫu từ mỗi client
-        client_params = []
-        sample_counts = []
-        
-        for client_id, update in client_updates.items():
-            client_params.append(update['params'])
-            sample_counts.append(update['metrics']['samples'])
-        
-        total_samples = sum(sample_counts)
-        
-        # Tính trọng số cho mỗi client
-        if total_samples == 0:
-            weights = [1.0 / len(client_params)] * len(client_params)
-        else:
-            weights = [count / total_samples for count in sample_counts]
-        
-        # Khởi tạo tham số tổng hợp từ khung của client đầu tiên
-        aggregated_params = copy.deepcopy(client_params[0])
-        
-        # Thực hiện tổng hợp có trọng số
-        for key in aggregated_params:
-            aggregated_params[key] = torch.zeros_like(aggregated_params[key])
-            
-            for i, params in enumerate(client_params):
-                aggregated_params[key] += weights[i] * params[key]
-        
-        return aggregated_params
-    
-    def _aggregate_fedtrust(self, client_updates) -> Dict[str, torch.Tensor]:
-        """
-        Tổng hợp cập nhật mô hình từ các client sử dụng FedTrust (cập nhật tham số dựa trên điểm tin cậy).
-        
-        Args:
-            client_updates: Dictionary chứa cập nhật từ mỗi client
-            
-        Returns:
-            Dict: Tham số mô hình đã được tổng hợp
-        """
-        # Lấy tham số, số mẫu và điểm tin cậy từ mỗi client
-        client_params = []
-        sample_counts = []
-        trust_scores = []
-        
-        for client_id, update in client_updates.items():
-            client_params.append(update['params'])
-            sample_counts.append(update['metrics']['samples'])
-            trust_scores.append(update['metrics']['trust_score'])
-        
-        # Tính trọng số kết hợp giữa số mẫu và điểm tin cậy
-        trust_weights = [score / sum(trust_scores) for score in trust_scores]
-        sample_weights = [count / sum(sample_counts) for count in sample_counts] if sum(sample_counts) > 0 else [1.0 / len(sample_counts)] * len(sample_counts)
-        
-        # Kết hợp hai loại trọng số (0.7 cho điểm tin cậy, 0.3 cho số mẫu)
-        weights = [0.7 * tw + 0.3 * sw for tw, sw in zip(trust_weights, sample_weights)]
-        
-        # Chuẩn hóa trọng số
-        weights = [w / sum(weights) for w in weights]
-        
-        # Khởi tạo tham số tổng hợp từ khung của client đầu tiên
-        aggregated_params = copy.deepcopy(client_params[0])
-        
-        # Thực hiện tổng hợp có trọng số
-        for key in aggregated_params:
-            aggregated_params[key] = torch.zeros_like(aggregated_params[key])
-            
-            for i, params in enumerate(client_params):
-                aggregated_params[key] += weights[i] * params[key]
-        
-        return aggregated_params
-    
-    def _aggregate_fedadam(self, client_updates) -> Dict[str, torch.Tensor]:
-        """
-        Tổng hợp cập nhật mô hình từ các client sử dụng FedAdam (với cập nhật adaptive dựa trên Adam).
-        
-        Args:
-            client_updates: Dictionary chứa cập nhật từ mỗi client
-            
-        Returns:
-            Dict: Tham số mô hình đã được tổng hợp
-        """
-        # Tổng hợp các tham số mô hình bằng FedAvg
-        avg_params = self._aggregate_fedavg(client_updates)
-        current_params = self.global_model.state_dict()
-        
-        # Tính gradient là hiệu giữa tham số trung bình mới và tham số hiện tại
-        grad = {}
-        for key in avg_params:
-            grad[key] = current_params[key] - avg_params[key]
-        
-        # Khởi tạo m và v nếu đây là vòng đầu tiên
-        if self.adam_m is None or self.adam_v is None:
-            self.adam_m = {}
-            self.adam_v = {}
-            for key in grad:
-                self.adam_m[key] = torch.zeros_like(grad[key])
-                self.adam_v[key] = torch.zeros_like(grad[key])
-        
-        # Cập nhật tham số sử dụng Adam
-        t = self.round_counter + 1
-        lr_t = self.adam_lr * (np.sqrt(1 - self.adam_beta2**t) / (1 - self.adam_beta1**t))
-        
-        for key in grad:
-            # Cập nhật m và v
-            self.adam_m[key] = self.adam_beta1 * self.adam_m[key] + (1 - self.adam_beta1) * grad[key]
-            self.adam_v[key] = self.adam_beta2 * self.adam_v[key] + (1 - self.adam_beta2) * grad[key]**2
-            
-            # Cập nhật tham số
-            current_params[key] = current_params[key] - lr_t * self.adam_m[key] / (torch.sqrt(self.adam_v[key]) + self.adam_eps)
-        
-        return current_params
-    
     def aggregate_updates(self, client_updates: Dict) -> None:
         """
         Tổng hợp cập nhật tham số từ các client theo phương pháp đã chọn.
@@ -386,29 +301,108 @@ class FederatedLearning:
         """
         if not client_updates:
             return
+            
+        # Lấy danh sách tham số mô hình
+        params_list = [update['params'] for _, update in client_updates.items()]
         
-        # Chọn phương pháp tổng hợp thích hợp
-        if self.aggregation_method == 'fedavg':
-            aggregated_params = self._aggregate_fedavg(client_updates)
-        elif self.aggregation_method == 'fedtrust':
-            aggregated_params = self._aggregate_fedtrust(client_updates)
+        # Lấy trọng số dựa trên số lượng mẫu
+        sample_counts = [update['metrics']['samples'] for _, update in client_updates.items()]
+        weights = [count / sum(sample_counts) if sum(sample_counts) > 0 else 1.0 / len(sample_counts) 
+                  for count in sample_counts]
+        
+        # Nếu sử dụng secure aggregation
+        if self.secure_aggregator is not None:
+            try:
+                aggregated_params = self.secure_aggregator.aggregate_secure(
+                    client_updates, weights
+                )
+                self.global_model.load_state_dict(aggregated_params)
+                return
+            except Exception as e:
+                print(f"Lỗi khi thực hiện secure aggregation: {e}")
+                print("Chuyển sang phương pháp tổng hợp thông thường...")
+        
+        # Các tham số bổ sung dựa trên phương pháp tổng hợp
+        kwargs = {'weights': weights}
+        
+        if self.aggregation_method == 'fedtrust':
+            # Lấy điểm tin cậy và hiệu suất cho adaptive_fedavg
+            trust_scores = [update['metrics'].get('trust_score', 0.5) for _, update in client_updates.items()]
+            
+            # Tính điểm hiệu suất (nghịch đảo của loss)
+            performance_scores = []
+            for _, update in client_updates.items():
+                if update['metrics']['val_loss'] is not None:
+                    perf = 1.0 / (update['metrics']['val_loss'] + 1e-10)
+                else:
+                    perf = 1.0 / (update['metrics']['train_loss'][-1] if update['metrics']['train_loss'] else 1.0 + 1e-10)
+                performance_scores.append(perf)
+            
+            kwargs.update({
+                'trust_scores': trust_scores,
+                'performance_scores': performance_scores
+            })
+        
         elif self.aggregation_method == 'fedadam':
-            aggregated_params = self._aggregate_fedadam(client_updates)
+            # Thêm tham số mô hình toàn cục cho FedProx
+            kwargs.update({
+                'global_params': self.global_model.state_dict(),
+                'mu': 0.01  # Hệ số regularization mặc định
+            })
+        
+        # Kiểm tra yêu cầu bảo mật
+        suspected_byzantine = any(
+            update['metrics'].get('trust_score', 1.0) < 0.3 
+            for _, update in client_updates.items()
+        )
+        
+        # Đề xuất phương pháp tổng hợp tốt nhất nếu đang ở chế độ tự động
+        if self.aggregation_method == 'auto':
+            method = self.aggregation_manager.recommend_method(
+                num_clients=len(params_list),
+                has_trust_scores=(self.aggregation_method == 'fedtrust'),
+                suspected_byzantine=suspected_byzantine
+            )
         else:
-            raise ValueError(f"Phương pháp tổng hợp không hợp lệ: {self.aggregation_method}")
+            # Ánh xạ tên phương pháp cũ sang tên phương pháp mới
+            method = self.method_mapping.get(self.aggregation_method, 'weighted_average')
+        
+        # Tổng hợp mô hình với phương pháp đã chọn
+        aggregated_params = self.aggregation_manager.aggregate(method, params_list, **kwargs)
+        
+        # Thêm nhiễu nếu sử dụng privacy preserving nhưng không có secure aggregation
+        if self.privacy_preserving and self.secure_aggregator is None:
+            total_samples = sum(sample_counts)
+            aggregated_params = self.privacy_manager.add_noise_to_model(
+                aggregated_params, total_samples
+            )
         
         # Cập nhật mô hình toàn cục
         self.global_model.load_state_dict(aggregated_params)
         
-        # Cập nhật hiệu suất client
-        for client_id, update in client_updates.items():
-            # Sử dụng loss làm thước đo hiệu suất (nghịch đảo)
-            if update['metrics']['val_loss'] is not None:
-                performance = 1.0 / (update['metrics']['val_loss'] + 1e-10)  # Tránh chia cho 0
-            else:
-                performance = 1.0 / (update['metrics']['train_loss'][-1] + 1e-10)
-                
-            self.client_performance[client_id].append(performance)
+        # Cập nhật metrics hiệu suất
+        avg_loss = np.mean([
+            update['metrics']['val_loss'] if update['metrics']['val_loss'] is not None 
+            else update['metrics']['train_loss'][-1]
+            for _, update in client_updates.items()
+        ])
+        
+        self.aggregation_manager.update_performance_metrics(method, {
+            'loss': avg_loss,
+            'score': 1.0 / (avg_loss + 1e-10),
+            'num_clients': len(params_list),
+            'suspected_byzantine': suspected_byzantine
+        })
+        
+        # Cập nhật privacy report nếu có
+        if self.privacy_preserving:
+            privacy_report = self.privacy_manager.get_privacy_report()
+            print("\nPrivacy Report:")
+            print(f"Status: {privacy_report['status']}")
+            print(f"Consumed Budget: {privacy_report['consumed_budget']:.4f}")
+            print(f"Remaining Budget: {privacy_report['remaining_budget']:.4f}")
+            if privacy_report['status'] == 'Privacy budget exceeded':
+                print("Warning: Privacy budget đã vượt quá giới hạn!")
     
     def _personalize_client_model(self, client: FederatedClient) -> None:
         """

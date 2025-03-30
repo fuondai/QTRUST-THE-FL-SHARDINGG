@@ -1,0 +1,82 @@
+{
+    "configuration": {
+        "num_shards": 3,
+        "nodes_per_shard": 8,
+        "malicious_percentage": 10,
+        "attack_scenario": "sybil",
+        "attack_types": [
+            "sybil"
+        ]
+    },
+    "performance": {
+        "throughput": 5.0,
+        "latency": 7.927333333333334,
+        "energy": 1.5174553142473794,
+        "security": 0.43009363508750026,
+        "cross_shard_ratio": 0.2,
+        "transaction_success_rate": 1.0,
+        "network_stability": 0.6394421811111112,
+        "resource_utilization": 0.014877096960000002,
+        "consensus_efficiency": 0.9920726666666667,
+        "shard_health": 0.8868326543333334,
+        "network_resilience": 0.43009363508750026
+    },
+    "shard_statistics": {
+        "shard_0": {
+            "num_nodes": 8,
+            "malicious_nodes": 0,
+            "congestion_level": 0.01,
+            "network_stability": 0.4827491433333334,
+            "resource_utilization": 0.018889229312000003,
+            "transactions_processed": 19,
+            "transactions_blocked": 0,
+            "health_score": 0.8418247430000001
+        },
+        "shard_1": {
+            "num_nodes": 8,
+            "malicious_nodes": 0,
+            "congestion_level": 0.02,
+            "network_stability": 0.8173314,
+            "resource_utilization": 0.012239075328000002,
+            "transactions_processed": 15,
+            "transactions_blocked": 0,
+            "health_score": 0.93919942
+        },
+        "shard_2": {
+            "num_nodes": 8,
+            "malicious_nodes": 0,
+            "congestion_level": 0.02,
+            "network_stability": 0.6182460000000001,
+            "resource_utilization": 0.013502986240000004,
+            "transactions_processed": 16,
+            "transactions_blocked": 0,
+            "health_score": 0.8794738
+        }
+    },
+    "pipeline_stats": {
+        "validation": 50,
+        "routing": 50,
+        "consensus": 50,
+        "execution": 50,
+        "commit": 50
+    },
+    "pipeline_performance": {
+        "pipeline_throughput": 5.0,
+        "stage_efficiency": {
+            "validation": 1.0,
+            "routing": 1.0,
+            "consensus": 1.0,
+            "execution": 1.0,
+            "commit": 1.0
+        },
+        "bottleneck_stage": "validation",
+        "parallel_efficiency": 1.0,
+        "total_transactions": {
+            "validation": 50,
+            "routing": 50,
+            "consensus": 50,
+            "execution": 50,
+            "commit": 50
+        }
+    }
+}
