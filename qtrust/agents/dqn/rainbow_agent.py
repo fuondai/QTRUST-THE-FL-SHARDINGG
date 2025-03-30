@@ -28,6 +28,7 @@ from qtrust.agents.dqn.utils import (
     exponential_decay, linear_decay, generate_timestamp, create_save_directory,
     plot_learning_curve, format_time, get_device, logger, SAVE_DIR
 )
+from qtrust.utils.cache import tensor_cache, lru_cache, compute_hash
 
 class RainbowDQNAgent:
     """
@@ -165,34 +166,55 @@ class RainbowDQNAgent:
         
         # Lưu kinh nghiệm vào replay memory với tính toán TD error
         with torch.no_grad():
-            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-            next_state_tensor = torch.FloatTensor(next_state).unsqueeze(0).to(self.device)
+            # Cache key cho tính toán TD error
+            cache_key = f"td_error_{compute_hash((state, action, reward, next_state, done))}"
             
-            # Tính current Q distribution
-            action_distributions, _ = self.qnetwork_local(state_tensor)
-            action_dist = action_distributions[0][:, action, :]  # [batch_size, n_atoms]
-            
-            # Tính expected Q distribution với double DQN
-            next_action_distributions, _ = self.qnetwork_local(next_state_tensor)
-            next_actions = next_action_distributions[0].sum(dim=2).argmax(dim=1)  # Lấy hành động từ local network
-            
-            next_dist_target, _ = self.qnetwork_target(next_state_tensor)
-            next_dist = next_dist_target[0].gather(1, next_actions.unsqueeze(1).unsqueeze(2).expand(-1, -1, self.n_atoms))
-            next_dist = next_dist.squeeze(1)  # [batch_size, n_atoms]
-            
-            # Tính TD target
-            if done:
-                # Khi kết thúc, phân phối target là delta function tại reward
-                target_idx = torch.clamp(torch.floor((reward - self.v_min) / self.delta_z), 0, self.n_atoms - 1).long()
-                target_dist = torch.zeros(self.n_atoms).to(self.device)
-                target_dist[target_idx] = 1.0
+            # Kiểm tra nếu TD error đã được tính toán trước đó
+            if hasattr(self, '_td_error_cache') and cache_key in self._td_error_cache:
+                td_error = self._td_error_cache[cache_key]
             else:
-                # Khi chưa kết thúc, phân phối target là projection của phân phối Bellman
-                # Vì đây chỉ là TD error estimate cho priority, nên dùng cách đơn giản hơn
-                target_dist = next_dist
-            
-            # Tính KL divergence làm TD error
-            td_error = F.kl_div(action_dist.log(), target_dist, reduction='sum').item()
+                # Tính toán TD error nếu không có trong cache
+                state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+                next_state_tensor = torch.FloatTensor(next_state).unsqueeze(0).to(self.device)
+                
+                # Tính current Q distribution
+                action_distributions, _ = self.qnetwork_local(state_tensor)
+                action_dist = action_distributions[0][:, action, :]  # [batch_size, n_atoms]
+                
+                # Tính expected Q distribution với double DQN
+                next_action_distributions, _ = self.qnetwork_local(next_state_tensor)
+                next_actions = next_action_distributions[0].sum(dim=2).argmax(dim=1)  # Lấy hành động từ local network
+                
+                next_dist_target, _ = self.qnetwork_target(next_state_tensor)
+                next_dist = next_dist_target[0].gather(1, next_actions.unsqueeze(1).unsqueeze(2).expand(-1, -1, self.n_atoms))
+                next_dist = next_dist.squeeze(1)  # [batch_size, n_atoms]
+                
+                # Tính TD target
+                if done:
+                    # Khi kết thúc, phân phối target là delta function tại reward
+                    reward_tensor = torch.tensor([reward], device=self.device)
+                    target_idx = torch.clamp(torch.floor((reward_tensor - self.v_min) / self.delta_z), 0, self.n_atoms - 1).long()
+                    target_dist = torch.zeros(self.n_atoms).to(self.device)
+                    target_dist[target_idx] = 1.0
+                else:
+                    # Khi chưa kết thúc, phân phối target là projection của phân phối Bellman
+                    # Vì đây chỉ là TD error estimate cho priority, nên dùng cách đơn giản hơn
+                    target_dist = next_dist
+                
+                # Tính KL divergence làm TD error
+                td_error = F.kl_div(action_dist.log(), target_dist, reduction='sum').item()
+                
+                # Lưu vào cache nếu chưa có
+                if not hasattr(self, '_td_error_cache'):
+                    self._td_error_cache = {}
+                
+                # Giới hạn kích thước cache
+                if len(self._td_error_cache) > 1000:
+                    # Xóa một phần tử ngẫu nhiên nếu cache quá lớn
+                    key_to_remove = random.choice(list(self._td_error_cache.keys()))
+                    self._td_error_cache.pop(key_to_remove, None)
+                
+                self._td_error_cache[cache_key] = td_error
         
         # Thêm kinh nghiệm vào buffer với ưu tiên dựa trên TD error
         self.memory.push(state, action, reward, next_state, done, td_error)
@@ -202,6 +224,34 @@ class RainbowDQNAgent:
         if self.t_step == 0 and len(self.memory) > self.batch_size and self.total_steps > self.warm_up_steps:
             experiences = self.memory.sample()
             self._learn(experiences)
+    
+    @lru_cache(maxsize=512)
+    def _cached_act_inference(self, state_tuple):
+        """
+        Phiên bản có cache của phương thức đưa ra quyết định.
+        Chuyển đổi tensor thành tuple để có thể dùng làm key trong cache.
+        
+        Args:
+            state_tuple: Tuple dữ liệu state
+            
+        Returns:
+            int: Hành động được chọn
+        """
+        # Chuyển tuple trở lại thành tensor
+        state = torch.FloatTensor(state_tuple).unsqueeze(0).to(self.device)
+        
+        # Tắt chế độ học cho mạng
+        self.qnetwork_local.eval()
+        with torch.no_grad():
+            # Lấy phân phối Q
+            action_distributions, _ = self.qnetwork_local(state)
+            action_dist = action_distributions[0]  # [batch_size, action_size, n_atoms]
+            
+            # Tính expected value
+            expected_q = torch.sum(action_dist * self.support.unsqueeze(0).unsqueeze(0), dim=2)
+            
+        # Trả về hành động tốt nhất
+        return np.argmax(expected_q.cpu().data.numpy())
     
     def act(self, state, eps=None):
         """
@@ -214,27 +264,59 @@ class RainbowDQNAgent:
         Returns:
             int: Hành động được chọn
         """
-        # Chuyển state thành tensor
-        state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+        # Chuyển state thành tuple để có thể sử dụng như key trong cache
+        state_tuple = tuple(np.asarray(state).flatten())
         
-        # Tắt chế độ học cho mạng
-        self.qnetwork_local.eval()
-        with torch.no_grad():
-            # Lấy phân phối Q
-            action_distributions, _ = self.qnetwork_local(state)
-            action_dist = action_distributions[0]  # [batch_size, action_size, n_atoms]
-            
-            # Tính expected value
-            expected_q = torch.sum(action_dist * self.support.unsqueeze(0).unsqueeze(0), dim=2)
-            
-        # Bật lại chế độ học cho mạng
+        # Bật lại chế độ học cho mạng trước khi gọi act
         self.qnetwork_local.train()
         
         # Reset noise cho Noisy Networks
         self.qnetwork_local.reset_noise()
         
-        # Chọn hành động dựa trên expected Q values
-        return np.argmax(expected_q.cpu().data.numpy())
+        # Sử dụng phiên bản có cache
+        return self._cached_act_inference(state_tuple)
+    
+    @tensor_cache
+    def _calculate_target_distribution(self, rewards, next_dist, dones, batch_idx):
+        """
+        Tính toán phân phối target cho Distributional RL.
+        Tách thành hàm riêng để có thể áp dụng caching.
+        
+        Args:
+            rewards: Phần thưởng cho transition
+            next_dist: Phân phối Q của trạng thái tiếp theo
+            dones: Cờ kết thúc
+            batch_idx: Chỉ số batch đang xử lý
+            
+        Returns:
+            torch.Tensor: Phân phối target
+        """
+        if dones:
+            # Khi kết thúc, phân phối target là delta function tại reward
+            target_idx = torch.clamp(torch.floor((rewards - self.v_min) / self.delta_z), 0, self.n_atoms - 1).long()
+            target_dist = torch.zeros_like(next_dist)
+            target_dist[target_idx] = 1.0
+            return target_dist
+        else:
+            # Projection của phân phối Bellman
+            # Tz_j = r + gamma * z_j
+            Tz = rewards + self.gamma * self.support
+            
+            # Tính projection
+            Tz = torch.clamp(Tz, self.v_min, self.v_max)
+            b = (Tz - self.v_min) / self.delta_z
+            l = b.floor().long()
+            u = b.ceil().long()
+            
+            # Đảm bảo là tensor
+            target_dist = torch.zeros_like(next_dist)
+            
+            # Phân phối xác suất thành 2 bins gần nhất
+            for j in range(self.n_atoms):
+                target_dist[l[j]] += next_dist[j] * (u[j] - b[j])
+                target_dist[u[j]] += next_dist[j] * (b[j] - l[j])
+            
+            return target_dist
     
     def _learn(self, experiences):
         """
@@ -264,28 +346,12 @@ class RainbowDQNAgent:
         # Tính phân phối target - Distributional RL
         target_dist = torch.zeros_like(current_dist)
         
+        # Sử dụng cache để tính phân phối target
         for idx in range(self.batch_size):
-            if dones[idx]:
-                # Khi kết thúc, phân phối target là delta function tại reward
-                target_idx = torch.clamp(torch.floor((rewards[idx] - self.v_min) / self.delta_z), 0, self.n_atoms - 1).long()
-                target_dist[idx, target_idx] = 1.0
-            else:
-                # Projection của phân phối Bellman
-                # p(Tz) = p(z)
-                
-                # Tz_j = r + gamma * z_j
-                Tz = rewards[idx] + self.gamma * self.support
-                
-                # Tính projection
-                Tz = torch.clamp(Tz, self.v_min, self.v_max)
-                b = (Tz - self.v_min) / self.delta_z
-                l = b.floor().long()
-                u = b.ceil().long()
-                
-                # Phân phối xác suất thành 2 bins gần nhất
-                for j in range(self.n_atoms):
-                    target_dist[idx, l[j]] += next_dist[idx, j] * (u[j] - b[j])
-                    target_dist[idx, u[j]] += next_dist[idx, j] * (b[j] - l[j])
+            # Sử dụng phiên bản cache của hàm tính phân phối target
+            target_dist[idx] = self._calculate_target_distribution(
+                rewards[idx], next_dist[idx], dones[idx], idx
+            )
         
         # Tính loss - Cross entropy loss
         log_current_dist = current_dist.clamp(1e-10, 1.0).log()

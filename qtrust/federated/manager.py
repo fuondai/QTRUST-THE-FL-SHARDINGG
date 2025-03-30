@@ -1,303 +1,328 @@
-import numpy as np
+"""
+Quản lý quá trình Federated Learning trong hệ thống QTrust.
+
+Module này cung cấp các công cụ để điều phối quá trình học liên bang
+giữa nhiều nút mạng phân tán.
+"""
+
+import logging
 import random
-from typing import Dict, List, Any, Optional
+import time
+from typing import Dict, List, Any, Callable, Optional, Tuple, Union
+
+import numpy as np
+import torch
+
+from qtrust.utils.cache import lru_cache, ttl_cache, compute_hash
+from qtrust.federated.model_aggregation import ModelAggregator 
+from qtrust.federated.protocol import FederatedProtocol
+from qtrust.federated.client import FederatedClient
+from qtrust.federated.privacy import PrivacyManager
+
+logger = logging.getLogger("qtrust.federated")
 
 class FederatedLearningManager:
     """
-    Quản lý quá trình học liên bang (Federated Learning) giữa các node trong mạng blockchain.
+    Quản lý quá trình huấn luyện Federated Learning.
+    
+    Lớp này điều phối việc phân phối mô hình, tổng hợp cập nhật,
+    và triển khai các chiến lược bảo mật và hiệu quả.
     """
     
-    def __init__(self, num_shards: int, nodes_per_shard: int, aggregation_method: str = 'weighted_average'):
+    def __init__(self, 
+                 initial_model: Dict[str, torch.Tensor],
+                 clients: List[FederatedClient],
+                 aggregation_method: str = 'weighted_average',
+                 client_fraction: float = 1.0,
+                 rounds: int = 10,
+                 local_epochs: int = 5,
+                 protocol: Optional[FederatedProtocol] = None,
+                 privacy_manager: Optional[PrivacyManager] = None,
+                 device: str = 'cpu',
+                 seed: int = 42):
         """
-        Khởi tạo trình quản lý học liên bang.
+        Khởi tạo FederatedLearningManager.
         
         Args:
-            num_shards: Số lượng shard trong mạng
-            nodes_per_shard: Số lượng node trong mỗi shard
-            aggregation_method: Phương pháp tổng hợp mô hình ('weighted_average', 'median', 'trimmed_mean')
+            initial_model: Mô hình khởi tạo ban đầu (từ điển state_dict)
+            clients: Danh sách các client tham gia
+            aggregation_method: Phương pháp tổng hợp cập nhật mô hình
+            client_fraction: Tỷ lệ client được chọn mỗi vòng
+            rounds: Số vòng huấn luyện
+            local_epochs: Số epoch huấn luyện cục bộ trên mỗi client
+            protocol: Giao thức giao tiếp giữa server và client
+            privacy_manager: Quản lý các kỹ thuật bảo mật
+            device: Thiết bị tính toán (cpu/cuda)
+            seed: Seed để đảm bảo reproducibility
         """
-        self.num_shards = num_shards
-        self.nodes_per_shard = nodes_per_shard
+        self.global_model = initial_model
+        self.clients = clients
+        self.client_fraction = client_fraction
+        self.rounds = rounds
+        self.local_epochs = local_epochs
+        self.protocol = protocol or FederatedProtocol()
+        self.privacy_manager = privacy_manager or PrivacyManager()
+        self.device = device
+        self.seed = seed
+        
+        # Khởi tạo bộ tổng hợp mô hình
+        self.aggregator = ModelAggregator()
         self.aggregation_method = aggregation_method
         
-        # Lưu trữ mô hình toàn cục và cục bộ
-        self.global_model = None
-        self.local_models = {}
+        # Thiết lập seed để đảm bảo reproducibility
+        self._set_seed(seed)
         
-        # Thông tin về dữ liệu và độ tin cậy của node
-        self.node_weights = {}  # Trọng số cho mỗi node khi tổng hợp
-        self.contribution_history = {}  # Lịch sử đóng góp của mỗi node
+        # Lưu trữ lịch sử huấn luyện
+        self.history = {
+            'global_performance': [],
+            'client_performances': {},
+            'selected_clients': [],
+            'aggregation_time': [],
+            'communication_volume': []
+        }
         
-        # Các tham số cho học liên bang
-        self.round = 0
-        self.min_clients_required = max(2, int(num_shards * nodes_per_shard * 0.1))  # Tối thiểu 10% node tham gia
+        # Cache cho các phép tính toán lặp lại
+        self.cache = {}
         
-        # Khởi tạo trọng số mặc định cho mỗi node
-        total_nodes = num_shards * nodes_per_shard
-        for node_id in range(total_nodes):
-            self.node_weights[node_id] = 1.0 / total_nodes
-            self.contribution_history[node_id] = []
+        # Khởi tạo lịch sử hiệu suất cho mỗi client
+        for client in self.clients:
+            self.history['client_performances'][client.id] = []
     
-    def reset(self):
-        """Khởi tạo lại trạng thái của trình quản lý học liên bang."""
-        self.global_model = None
-        self.local_models = {}
-        self.round = 0
-        
-        # Khôi phục trọng số về giá trị mặc định
-        total_nodes = self.num_shards * self.nodes_per_shard
-        for node_id in range(total_nodes):
-            self.node_weights[node_id] = 1.0 / total_nodes
-            self.contribution_history[node_id] = []
+    def _set_seed(self, seed: int):
+        """Thiết lập các seed để đảm bảo reproducibility."""
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(seed)
+            torch.cuda.manual_seed_all(seed)
     
-    def aggregate_models(self, local_data: Dict[int, Any]) -> Optional[Any]:
+    @lru_cache(maxsize=100)
+    def _select_clients(self, round_idx: int, client_ids: Tuple[str, ...], fraction: float) -> List[FederatedClient]:
         """
-        Tổng hợp các mô hình cục bộ từ các node thành mô hình toàn cục.
+        Chọn một tập hợp các client tham gia vào vòng huấn luyện hiện tại.
         
         Args:
-            local_data: Từ điển ánh xạ từ node ID đến dữ liệu cục bộ (mô hình + metrics)
-            
-        Returns:
-            Optional[Any]: Mô hình toàn cục mới hoặc None nếu không đủ dữ liệu
-        """
-        if not local_data or len(local_data) < self.min_clients_required:
-            return None
-        
-        # Lưu trữ các mô hình cục bộ đã nhận
-        for node_id, data in local_data.items():
-            if 'model' in data:
-                self.local_models[node_id] = data['model']
-                
-                # Cập nhật lịch sử đóng góp
-                if 'quality' in data:
-                    self.contribution_history[node_id].append(data['quality'])
-                    # Giới hạn kích thước lịch sử
-                    if len(self.contribution_history[node_id]) > 10:
-                        self.contribution_history[node_id].pop(0)
-        
-        # Cập nhật trọng số của các node dựa trên lịch sử đóng góp
-        self._update_node_weights()
-        
-        # Tổng hợp các mô hình cục bộ thành mô hình toàn cục
-        if len(self.local_models) >= self.min_clients_required:
-            if self.aggregation_method == 'weighted_average':
-                self.global_model = self._weighted_average_aggregation()
-            elif self.aggregation_method == 'median':
-                self.global_model = self._median_aggregation()
-            elif self.aggregation_method == 'trimmed_mean':
-                self.global_model = self._trimmed_mean_aggregation()
-            else:
-                # Mặc định là weighted_average
-                self.global_model = self._weighted_average_aggregation()
-            
-            self.round += 1
-            return self.global_model
-        
-        return None
-    
-    def get_global_model(self) -> Optional[Any]:
-        """
-        Trả về mô hình toàn cục hiện tại.
+            round_idx: Chỉ số vòng huấn luyện hiện tại
+            client_ids: Tuple các ID client (dùng cho caching)
+            fraction: Tỷ lệ client được chọn
         
         Returns:
-            Optional[Any]: Mô hình toàn cục hoặc None nếu chưa có
+            List[FederatedClient]: Danh sách các client được chọn
         """
-        return self.global_model
-    
-    def _update_node_weights(self):
-        """Cập nhật trọng số của các node dựa trên lịch sử đóng góp."""
-        # Tính trọng số mới dựa trên chất lượng đóng góp gần đây
-        new_weights = {}
+        num_clients = max(1, int(fraction * len(self.clients)))
         
-        for node_id, history in self.contribution_history.items():
-            if history:
-                # Tính trung bình chất lượng đóng góp gần đây, ưu tiên các đóng góp mới hơn
-                if len(history) > 3:
-                    # Sử dụng trung bình có trọng số nếu có đủ lịch sử
-                    weights = np.exp(np.linspace(0, 1, len(history)))
-                    weights = weights / np.sum(weights)
-                    avg_quality = np.sum(np.array(history) * weights)
-                else:
-                    # Nếu không đủ lịch sử, sử dụng trung bình đơn giản
-                    avg_quality = np.mean(history)
-                
-                # Trọng số là hàm của chất lượng đóng góp
-                # Sử dụng hàm sigmoid để ánh xạ chất lượng vào khoảng (0, 1)
-                # và tăng độ dốc để làm nổi bật sự khác biệt
-                new_weights[node_id] = 1.0 / (1.0 + np.exp(-5 * (avg_quality - 0.5)))
-            else:
-                # Nếu không có lịch sử, sử dụng trọng số mặc định thấp
-                new_weights[node_id] = 0.1
+        # Sử dụng seed cố định cho mỗi vòng
+        local_random = random.Random(self.seed + round_idx)
         
-        # Chuẩn hóa trọng số
-        total_weight = sum(new_weights.values())
-        if total_weight > 0:
-            for node_id in new_weights:
-                new_weights[node_id] /= total_weight
-        
-        # Cập nhật trọng số
-        self.node_weights.update(new_weights)
-    
-    def _weighted_average_aggregation(self) -> Any:
-        """
-        Tổng hợp mô hình bằng phương pháp trung bình có trọng số.
-        
-        Returns:
-            Any: Mô hình toàn cục mới
-        """
-        # Trong mô hình mô phỏng, chúng ta có thể giả định mô hình đơn giản là một số hoặc một danh sách thông số
-        # Trong thực tế, các mô hình có thể là tensor hoặc mảng đa chiều
-        
-        if not self.local_models:
-            return None
-        
-        # Tạo một mô hình mẫu (giả sử tất cả các mô hình có cùng cấu trúc)
-        if self.global_model is None:
-            # Khởi tạo mô hình toàn cục lần đầu
-            first_model = next(iter(self.local_models.values()))
-            if isinstance(first_model, dict):
-                # Nếu mô hình là từ điển (ví dụ: {layer1: weights1, layer2: weights2, ...})
-                self.global_model = {key: 0.0 for key in first_model}
-            elif isinstance(first_model, list):
-                # Nếu mô hình là danh sách (ví dụ: [weight1, weight2, ...])
-                self.global_model = [0.0] * len(first_model)
-            else:
-                # Nếu mô hình là số (đơn giản hóa cho mô phỏng)
-                self.global_model = 0.0
-        
-        # Tổng hợp mô hình bằng trung bình có trọng số
-        if isinstance(self.global_model, dict):
-            # Khởi tạo lại mô hình toàn cục
-            for key in self.global_model:
-                self.global_model[key] = 0.0
-            
-            # Tính trung bình có trọng số cho từng tham số
-            for node_id, model in self.local_models.items():
-                weight = self.node_weights.get(node_id, 0.0)
-                for key, value in model.items():
-                    if key in self.global_model:
-                        self.global_model[key] += weight * value
-            
-        elif isinstance(self.global_model, list):
-            # Khởi tạo lại mô hình toàn cục
-            self.global_model = [0.0] * len(self.global_model)
-            
-            # Tính trung bình có trọng số cho từng tham số
-            for node_id, model in self.local_models.items():
-                weight = self.node_weights.get(node_id, 0.0)
-                for i, value in enumerate(model):
-                    if i < len(self.global_model):
-                        self.global_model[i] += weight * value
-            
+        # Chọn client dựa trên một số yếu tố
+        if hasattr(self, 'client_trust_scores'):
+            # Ưu tiên client có độ tin cậy cao
+            trust_weights = [max(0.1, score) for score in self.client_trust_scores]
+            chosen_clients = local_random.choices(
+                self.clients, weights=trust_weights, k=num_clients
+            )
         else:
-            # Đơn giản hóa cho mô phỏng với một số duy nhất
-            self.global_model = 0.0
-            for node_id, model in self.local_models.items():
-                weight = self.node_weights.get(node_id, 0.0)
-                self.global_model += weight * model
+            # Nếu không có điểm tin cậy, chọn ngẫu nhiên
+            chosen_clients = local_random.sample(self.clients, num_clients)
+            
+        # Lưu lại danh sách client được chọn
+        self.history['selected_clients'].append([client.id for client in chosen_clients])
         
-        return self.global_model
+        return chosen_clients
     
-    def _median_aggregation(self) -> Any:
+    @ttl_cache(ttl=3600)  # Cache trong 1 giờ
+    def _evaluate_global_model(self, model_hash: str, round_idx: int) -> Dict[str, float]:
         """
-        Tổng hợp mô hình bằng phương pháp median để giảm ảnh hưởng của outlier.
-        
-        Returns:
-            Any: Mô hình toàn cục mới
-        """
-        if not self.local_models:
-            return None
-        
-        # Tạo một mô hình mẫu (giả sử tất cả các mô hình có cùng cấu trúc)
-        if self.global_model is None:
-            # Khởi tạo mô hình toàn cục lần đầu
-            first_model = next(iter(self.local_models.values()))
-            if isinstance(first_model, dict):
-                self.global_model = {key: 0.0 for key in first_model}
-            elif isinstance(first_model, list):
-                self.global_model = [0.0] * len(first_model)
-            else:
-                self.global_model = 0.0
-        
-        # Tổng hợp mô hình bằng median
-        if isinstance(self.global_model, dict):
-            for key in self.global_model:
-                values = [model[key] for model in self.local_models.values() if key in model]
-                if values:
-                    self.global_model[key] = np.median(values)
-                    
-        elif isinstance(self.global_model, list):
-            for i in range(len(self.global_model)):
-                values = [model[i] for model in self.local_models.values() if i < len(model)]
-                if values:
-                    self.global_model[i] = np.median(values)
-                    
-        else:
-            # Đơn giản hóa cho mô phỏng với một số duy nhất
-            self.global_model = np.median(list(self.local_models.values()))
-        
-        return self.global_model
-    
-    def _trimmed_mean_aggregation(self, trim_ratio: float = 0.2) -> Any:
-        """
-        Tổng hợp mô hình bằng phương pháp trimmed mean.
+        Đánh giá hiệu suất của mô hình toàn cục trên tập dữ liệu đánh giá.
         
         Args:
-            trim_ratio: Tỷ lệ phần trăm các giá trị nhỏ nhất và lớn nhất để loại bỏ (mặc định: 0.2)
+            model_hash: Hash của mô hình để cache kết quả
+            round_idx: Chỉ số vòng huấn luyện hiện tại
             
         Returns:
-            Any: Mô hình toàn cục mới
+            Dict[str, float]: Chỉ số hiệu suất của mô hình
         """
-        if not self.local_models:
-            return None
+        logger.info(f"Đánh giá mô hình toàn cục sau vòng {round_idx}...")
         
-        # Tạo một mô hình mẫu (giả sử tất cả các mô hình có cùng cấu trúc)
-        if self.global_model is None:
-            # Khởi tạo mô hình toàn cục lần đầu
-            first_model = next(iter(self.local_models.values()))
-            if isinstance(first_model, dict):
-                self.global_model = {key: 0.0 for key in first_model}
-            elif isinstance(first_model, list):
-                self.global_model = [0.0] * len(first_model)
+        # Đánh giá trên một tập dữ liệu giữ lại
+        if hasattr(self, 'test_data'):
+            # Placeholder for actual evaluation
+            performance = {'accuracy': 0.85 + round_idx * 0.01, 'loss': 0.4 - round_idx * 0.02}
+            
+            # TODO: Thực hiện đánh giá thực tế
+            # performance = evaluate_model(self.global_model, self.test_data)
+            
+            self.history['global_performance'].append(performance)
+            return performance
+        
+        # Nếu không có tập test, đánh giá trên dữ liệu của các client
+        performance_scores = []
+        
+        for client in self.clients:
+            # Gửi mô hình tới client để đánh giá
+            client_perf = client.evaluate(self.global_model)
+            performance_scores.append(client_perf)
+        
+        # Tính trung bình các chỉ số hiệu suất
+        avg_performance = {}
+        for metric in performance_scores[0].keys():
+            avg_performance[metric] = sum(p[metric] for p in performance_scores) / len(performance_scores)
+        
+        self.history['global_performance'].append(avg_performance)
+        return avg_performance
+    
+    @lru_cache(maxsize=10)
+    def _compute_client_trust_scores(self, performance_cache_key: str) -> List[float]:
+        """
+        Tính toán điểm tin cậy cho mỗi client dựa trên hiệu suất quá khứ.
+        
+        Args:
+            performance_cache_key: Khóa cache cho dữ liệu hiệu suất
+            
+        Returns:
+            List[float]: Điểm tin cậy cho mỗi client
+        """
+        # Mô phỏng tính toán điểm tin cậy
+        trust_scores = []
+        
+        for client in self.clients:
+            # Lấy lịch sử hiệu suất của client
+            performances = self.history['client_performances'][client.id]
+            
+            if not performances:
+                # Nếu không có dữ liệu, sử dụng giá trị mặc định
+                trust_scores.append(0.5)
+                continue
+            
+            # Tính điểm tin cậy dựa trên độ chính xác đóng góp
+            accuracy_contribution = []
+            last_n = min(5, len(performances))  # Xem xét 5 vòng gần nhất
+            
+            for perf in performances[-last_n:]:
+                if 'accuracy' in perf:
+                    accuracy_contribution.append(perf['accuracy'])
+                elif 'loss' in perf:
+                    # Chuyển đổi loss thành độ chính xác tương đối
+                    accuracy_contribution.append(1.0 / (1.0 + perf['loss']))
+            
+            # Tính điểm tin cậy dựa trên độ chính xác trung bình
+            if accuracy_contribution:
+                avg_accuracy = sum(accuracy_contribution) / len(accuracy_contribution)
+                trust_score = min(1.0, avg_accuracy)  # Giới hạn tối đa là 1.0
             else:
-                self.global_model = 0.0
+                trust_score = 0.5  # Giá trị mặc định
+            
+            trust_scores.append(trust_score)
         
-        # Tổng hợp mô hình bằng trimmed mean
-        if isinstance(self.global_model, dict):
-            for key in self.global_model:
-                values = [model[key] for model in self.local_models.values() if key in model]
-                if values:
-                    # Loại bỏ trim_ratio các giá trị ở mỗi đầu
-                    k = int(len(values) * trim_ratio)
-                    if k > 0:
-                        sorted_values = sorted(values)
-                        trimmed_values = sorted_values[k:-k] if len(sorted_values) > 2*k else sorted_values
-                        self.global_model[key] = np.mean(trimmed_values)
-                    else:
-                        self.global_model[key] = np.mean(values)
-                    
-        elif isinstance(self.global_model, list):
-            for i in range(len(self.global_model)):
-                values = [model[i] for model in self.local_models.values() if i < len(model)]
-                if values:
-                    # Loại bỏ trim_ratio các giá trị ở mỗi đầu
-                    k = int(len(values) * trim_ratio)
-                    if k > 0:
-                        sorted_values = sorted(values)
-                        trimmed_values = sorted_values[k:-k] if len(sorted_values) > 2*k else sorted_values
-                        self.global_model[i] = np.mean(trimmed_values)
-                    else:
-                        self.global_model[i] = np.mean(values)
-                    
-        else:
-            # Đơn giản hóa cho mô phỏng với một số duy nhất
-            values = list(self.local_models.values())
-            k = int(len(values) * trim_ratio)
-            if k > 0:
-                sorted_values = sorted(values)
-                trimmed_values = sorted_values[k:-k] if len(sorted_values) > 2*k else sorted_values
-                self.global_model = np.mean(trimmed_values)
+        return trust_scores
+    
+    def train(self) -> Dict[str, torch.Tensor]:
+        """
+        Huấn luyện mô hình sử dụng Federated Learning.
+        
+        Returns:
+            Dict[str, torch.Tensor]: Mô hình toàn cục cuối cùng
+        """
+        logger.info(f"Bắt đầu quá trình Federated Learning với {len(self.clients)} clients...")
+        
+        for round_idx in range(self.rounds):
+            start_time = time.time()
+            logger.info(f"------ Vòng {round_idx+1}/{self.rounds} ------")
+            
+            # Tính điểm tin cậy cho mỗi client
+            client_ids = tuple(client.id for client in self.clients)
+            perf_cache_key = compute_hash(self.history['client_performances'])
+            self.client_trust_scores = self._compute_client_trust_scores(perf_cache_key)
+            
+            # Chọn client tham gia vòng huấn luyện hiện tại
+            selected_clients = self._select_clients(round_idx, client_ids, self.client_fraction)
+            logger.info(f"Đã chọn {len(selected_clients)}/{len(self.clients)} clients")
+            
+            # Phân phối mô hình cho các client
+            client_updates = []
+            client_weights = []
+            client_performance = []
+            trust_scores = []
+            
+            for client in selected_clients:
+                client_idx = self.clients.index(client)
+                trust_score = self.client_trust_scores[client_idx]
+                trust_scores.append(trust_score)
+                
+                # Áp dụng các kỹ thuật bảo mật nếu cần
+                secure_model = self.privacy_manager.secure_model_for_client(
+                    self.global_model, client.id, trust_score
+                )
+                
+                # Gửi mô hình tới client và nhận cập nhật
+                client_model, client_stats = client.train(
+                    secure_model, 
+                    epochs=self.local_epochs
+                )
+                
+                # Áp dụng các kỹ thuật bảo mật cho cập nhật
+                verified_model = self.privacy_manager.verify_client_update(
+                    client_model, client.id, trust_score
+                )
+                
+                # Thu thập cập nhật
+                client_updates.append(verified_model)
+                client_weights.append(client_stats['sample_size'])
+                client_performance.append(client_stats['performance'])
+                
+                # Cập nhật lịch sử hiệu suất
+                self.history['client_performances'][client.id].append(client_stats['performance'])
+            
+            # Tổng hợp các cập nhật từ client
+            aggregation_start = time.time()
+            
+            # Chuẩn bị tham số cho bộ tổng hợp
+            agg_params = {
+                'params_list': client_updates,
+                'weights': client_weights
+            }
+            
+            # Thêm tham số cho các phương pháp đặc biệt
+            if self.aggregation_method == 'fedprox':
+                agg_params['global_params'] = self.global_model
+            elif self.aggregation_method == 'fedadam':
+                agg_params['global_params'] = self.global_model
+            elif self.aggregation_method == 'fedtrust':
+                agg_params['trust_scores'] = trust_scores
+                agg_params['performance_scores'] = [p.get('accuracy', 0.5) for p in client_performance]
+            
+            # Gọi phương thức tổng hợp tương ứng
+            if self.aggregation_method in self.aggregator.methods:
+                self.global_model = self.aggregator.methods[self.aggregation_method](**agg_params)
             else:
-                self.global_model = np.mean(values)
+                # Fallback to weighted_average
+                self.global_model = self.aggregator.weighted_average(**agg_params)
+            
+            aggregation_time = time.time() - aggregation_start
+            self.history['aggregation_time'].append(aggregation_time)
+            
+            # Xóa cache quá cũ để giảm bộ nhớ
+            if round_idx % 5 == 0:
+                self.aggregator.clear_cache()
+            
+            # Đánh giá mô hình toàn cục
+            model_hash = compute_hash(self.global_model)
+            performance = self._evaluate_global_model(model_hash, round_idx)
+            
+            # Ghi lại thời gian hoàn thành vòng
+            round_time = time.time() - start_time
+            logger.info(f"Vòng {round_idx+1} hoàn thành trong {round_time:.2f}s")
+            logger.info(f"Hiệu suất: {performance}")
         
-        return self.global_model 
+        logger.info("Quá trình Federated Learning hoàn thành!")
+        return self.global_model
+    
+    def get_training_history(self) -> Dict[str, Any]:
+        """
+        Lấy lịch sử huấn luyện.
+        
+        Returns:
+            Dict[str, Any]: Lịch sử huấn luyện
+        """
+        return self.history 

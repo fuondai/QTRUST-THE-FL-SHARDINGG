@@ -26,6 +26,7 @@ from qtrust.agents.dqn.utils import (
     exponential_decay, linear_decay, generate_timestamp, create_save_directory,
     plot_learning_curve, format_time, get_device, logger, SAVE_DIR
 )
+from qtrust.utils.cache import tensor_cache, lru_cache, compute_hash
 
 class ActorCriticAgent:
     """
@@ -161,6 +162,21 @@ class ActorCriticAgent:
         self.best_model_path = None
         self.train_start_time = None
 
+        # Cache cho các hành động và giá trị
+        self.action_cache = {}
+        self.value_cache = {}
+        self.cache_hits = 0
+        self.cache_misses = 0
+        self.max_cache_size = 10000  # Giới hạn kích thước cache
+        
+        # Thống kê huấn luyện
+        self.train_count = 0
+        self.loss_history = {
+            'actor_loss': [],
+            'critic_loss': [],
+            'entropy': []
+        }
+
     def step(self, state, action, reward, next_state, done):
         """
         Thực hiện một bước học: lưu kinh nghiệm và học nếu đến lúc
@@ -183,44 +199,85 @@ class ActorCriticAgent:
             experiences = self.memory.sample()
             self._learn(experiences)
     
-    def act(self, state, deterministic=False):
+    def act(self, state, explore=True, use_target=False):
         """
-        Lựa chọn hành động dựa trên policy hiện tại
+        Lựa chọn hành động dựa trên trạng thái hiện tại.
         
         Args:
             state: Trạng thái hiện tại
-            deterministic: Nếu True, chọn hành động có xác suất cao nhất, nếu False, lấy mẫu từ phân phối
+            explore: Có thực hiện khám phá không
+            use_target: Sử dụng mạng target để lấy hành động
             
         Returns:
-            int: Hành động được chọn
+            Tuple: Hành động được chọn và log xác suất
         """
-        # Chuyển state thành tensor
-        state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+        # Chuyển sang tensor
+        if isinstance(state, np.ndarray):
+            state = torch.FloatTensor(state)
         
-        # Tắt chế độ học cho mạng
-        self.actor.eval()
-        with torch.no_grad():
-            # Lấy phân phối xác suất hành động
-            action_probs = self.actor(state)
-            action_prob = action_probs[0]  # [batch_size, action_size]
+        # Đảm bảo state có kích thước [batch_size, state_size]
+        if state.dim() == 1:
+            state = state.unsqueeze(0)
             
-            if deterministic:
-                # Chọn hành động có xác suất cao nhất
-                action = torch.argmax(action_prob, dim=1).cpu().numpy()[0]
+        state = state.to(self.device)
+        
+        # Tính hash của state để kiểm tra cache
+        state_hash = None
+        if not explore:
+            if isinstance(state, torch.Tensor):
+                state_np = state.cpu().numpy()
+                state_hash = compute_hash(state_np.tobytes())
             else:
-                # Lấy mẫu từ phân phối xác suất
-                action_dist = torch.distributions.Categorical(action_prob)
-                action = action_dist.sample().cpu().numpy()[0]
+                state_hash = compute_hash(state.tobytes())
+                
+            # Kiểm tra trong cache
+            if state_hash in self.action_cache:
+                self.cache_hits += 1
+                return self.action_cache[state_hash]
             
-        # Bật lại chế độ học cho mạng
-        self.actor.train()
+            self.cache_misses += 1
         
-        # Reset noise nếu sử dụng Noisy Networks
-        if self.use_noisy_nets:
-            self.actor.reset_noise()
-            self.critic.reset_noise()
+        # Lấy xác suất hành động
+        with torch.no_grad():
+            if use_target:
+                action_probs = self.actor_target(state) if hasattr(self, 'actor_target') else self.actor(state)
+            else:
+                action_probs = self._get_action_probs(state)
         
-        return action
+        # Khởi tạo phân phối hành động
+        if self.distributional:
+            # Phân phối qua mỗi atom của phân phối
+            dist = torch.distributions.Categorical(action_probs.squeeze())
+        else:
+            # Phân phối đơn giản qua các hành động
+            dist = torch.distributions.Categorical(action_probs)
+        
+        if explore:
+            # Lấy mẫu ngẫu nhiên từ phân phối
+            action = dist.sample()
+            log_prob = dist.log_prob(action)
+        else:
+            # Chọn hành động có xác suất cao nhất
+            action = torch.argmax(action_probs, dim=1)
+            log_prob = dist.log_prob(action)
+        
+        # Lưu vào cache nếu không thăm dò
+        if not explore and state_hash is not None:
+            action_item = action.item() if action.numel() == 1 else action.cpu().numpy()
+            log_prob_item = log_prob.item() if log_prob.numel() == 1 else log_prob.cpu().numpy()
+            
+            self.action_cache[state_hash] = (action_item, log_prob_item)
+            
+            # Giới hạn kích thước cache
+            if len(self.action_cache) > self.max_cache_size:
+                # Xóa một mục ngẫu nhiên
+                random_key = random.choice(list(self.action_cache.keys()))
+                del self.action_cache[random_key]
+        
+        if action.numel() == 1 and log_prob.numel() == 1:
+            return action.item(), log_prob.item()
+        else:
+            return action.cpu().numpy(), log_prob.cpu().numpy()
     
     def _learn(self, experiences):
         """
@@ -354,6 +411,58 @@ class ActorCriticAgent:
         self.critic_loss_history.append(critic_loss.item())
         self.actor_loss_history.append(actor_loss.item())
         self.entropy_history.append(entropy.item())
+        
+        self.train_count += 1
+        
+        # Xóa cache định kỳ
+        if self.train_count % 1000 == 0:
+            self.clear_cache()
+    
+    def clear_cache(self):
+        """Xóa cache hành động và giá trị."""
+        self.action_cache.clear()
+        self.value_cache.clear()
+        self.cache_hits = 0
+        self.cache_misses = 0
+    
+    @tensor_cache
+    def _get_action_probs(self, state_tensor: torch.Tensor) -> torch.Tensor:
+        """
+        Tính xác suất các hành động cho trạng thái đã cho.
+        
+        Args:
+            state_tensor: Tensor trạng thái đầu vào
+            
+        Returns:
+            torch.Tensor: Xác suất các hành động
+        """
+        return self.actor(state_tensor)
+    
+    @tensor_cache
+    def _get_state_value(self, state_tensor: torch.Tensor) -> torch.Tensor:
+        """
+        Tính giá trị trạng thái cho trạng thái đã cho.
+        
+        Args:
+            state_tensor: Tensor trạng thái đầu vào
+            
+        Returns:
+            torch.Tensor: Giá trị trạng thái
+        """
+        return self.critic(state_tensor)
+    
+    @tensor_cache
+    def _get_target_value(self, state_tensor: torch.Tensor) -> torch.Tensor:
+        """
+        Tính giá trị trạng thái target cho trạng thái đã cho.
+        
+        Args:
+            state_tensor: Tensor trạng thái đầu vào
+            
+        Returns:
+            torch.Tensor: Giá trị trạng thái từ mạng target
+        """
+        return self.critic_target(state_tensor)
     
     def save(self, filepath=None, episode=None):
         """
@@ -396,7 +505,9 @@ class ActorCriticAgent:
                 'state_size': self.state_size,
                 'action_size': self.action_size,
                 'distributional': self.distributional
-            }
+            },
+            'loss_history': self.loss_history,
+            'train_count': self.train_count
         }, filepath)
         
         logger.info(f"Model đã được lưu tại: {filepath}")
@@ -449,8 +560,31 @@ class ActorCriticAgent:
             if 'total_steps' in checkpoint:
                 self.total_steps = checkpoint['total_steps']
             
+            if 'loss_history' in checkpoint:
+                self.loss_history = checkpoint['loss_history']
+            
+            if 'train_count' in checkpoint:
+                self.train_count = checkpoint['train_count']
+            
             logger.info(f"Model đã được tải từ: {filepath}")
             return True
         except Exception as e:
             logger.error(f"Lỗi khi tải model: {str(e)}")
             return False 
+
+    def get_performance_stats(self) -> Dict[str, Any]:
+        """
+        Trả về thống kê hiệu suất của agent.
+        
+        Returns:
+            Dict[str, Any]: Thống kê hiệu suất
+        """
+        return {
+            'train_count': self.train_count,
+            'actor_loss': np.mean(self.loss_history['actor_loss'][-100:]) if self.loss_history['actor_loss'] else None,
+            'critic_loss': np.mean(self.loss_history['critic_loss'][-100:]) if self.loss_history['critic_loss'] else None,
+            'entropy': np.mean(self.loss_history['entropy'][-100:]) if self.loss_history['entropy'] else None,
+            'cache_hits': self.cache_hits,
+            'cache_misses': self.cache_misses,
+            'cache_hit_ratio': self.cache_hits / (self.cache_hits + self.cache_misses) if (self.cache_hits + self.cache_misses) > 0 else 0
+        } 

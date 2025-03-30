@@ -19,13 +19,14 @@ import time
 from datetime import datetime
 from typing import Dict, List, Tuple, Any, Optional, Union
 
-from qtrust.agents.dqn.networks import QNetwork
+from qtrust.agents.dqn.networks import QNetwork, DuelingQNetwork
 from qtrust.agents.dqn.replay_buffer import PrioritizedReplayBuffer, ReplayBuffer, EfficientReplayBuffer
 from qtrust.agents.dqn.utils import (
     soft_update, hard_update, calculate_td_error, calculate_huber_loss,
     exponential_decay, linear_decay, generate_timestamp, create_save_directory,
     plot_learning_curve, format_time, get_device, logger, SAVE_DIR
 )
+from qtrust.utils.cache import lru_cache, tensor_cache, compute_hash
 
 class DQNAgent:
     """
@@ -104,8 +105,12 @@ class DQNAgent:
         self.save_dir = create_save_directory(save_dir)
         
         # Khởi tạo mạng Q
-        self.qnetwork_local = QNetwork(state_size, [action_size], hidden_sizes=hidden_layers, noisy=noisy_nets).to(self.device)
-        self.qnetwork_target = QNetwork(state_size, [action_size], hidden_sizes=hidden_layers, noisy=noisy_nets).to(self.device)
+        if dueling:
+            self.qnetwork_local = DuelingQNetwork(state_size, action_size, hidden_layers, seed).to(self.device)
+            self.qnetwork_target = DuelingQNetwork(state_size, action_size, hidden_layers, seed).to(self.device)
+        else:
+            self.qnetwork_local = QNetwork(state_size, action_size, hidden_layers, seed).to(self.device)
+            self.qnetwork_target = QNetwork(state_size, action_size, hidden_layers, seed).to(self.device)
         self.optimizer = optim.Adam(self.qnetwork_local.parameters(), lr=learning_rate)
         
         # Thêm learning rate scheduler
@@ -141,55 +146,123 @@ class DQNAgent:
         self.best_score = -float('inf')
         self.best_model_path = None
         self.train_start_time = None
+        
+        # Cache hành động và giá trị Q
+        self.action_cache = {}
+        self.q_value_cache = {}
+        self.cache_hits = 0
+        self.cache_misses = 0
+        self.max_cache_size = 10000  # Giới hạn kích thước cache
 
-    def step(self, state, action, reward, next_state, done):
+    def clear_cache(self):
+        """Xóa cache hành động và giá trị Q."""
+        self.action_cache.clear()
+        self.q_value_cache.clear()
+        self.cache_hits = 0
+        self.cache_misses = 0
+    
+    @tensor_cache
+    def _get_q_values(self, state_tensor: torch.Tensor, use_target: bool = False) -> torch.Tensor:
         """
-        Thực hiện một bước học: lưu kinh nghiệm và học nếu đến lúc
+        Tính giá trị Q cho trạng thái đã cho.
         
         Args:
-            state: Trạng thái hiện tại
-            action: Hành động đã thực hiện
-            reward: Phần thưởng nhận được
-            next_state: Trạng thái mới
-            done: Cờ kết thúc
+            state_tensor: Tensor trạng thái đầu vào
+            use_target: Có sử dụng mạng target không
+            
+        Returns:
+            torch.Tensor: Giá trị Q
         """
+        if use_target:
+            return self.qnetwork_target(state_tensor)
+        else:
+            return self.qnetwork_local(state_tensor)
+    
+    def step(self, state, action, reward, next_state, done):
+        """
+        Thực hiện một bước học từ trải nghiệm
+
+        Args:
+            state: Trạng thái hiện tại
+            action: Hành động được thực hiện
+            reward: Phần thưởng nhận được
+            next_state: Trạng thái tiếp theo
+            done: Trạng thái kết thúc (episode đã hoàn thành)
+        """
+        # Lưu trữ trải nghiệm vào bộ nhớ
+        if self.prioritized_replay:
+            # Tính TD error cho ưu tiên
+            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+            next_state_tensor = torch.FloatTensor(next_state).unsqueeze(0).to(self.device)
+            
+            with torch.no_grad():
+                # Lấy giá trị Q hiện tại
+                q_values, _ = self.qnetwork_local(state_tensor)
+                q_value = q_values[0, action]
+                
+                # Lấy giá trị Q target
+                if self.double_dqn:
+                    q_next, _ = self.qnetwork_local(next_state_tensor)
+                    next_action = torch.argmax(q_next, dim=1).item()
+                    q_target_next, _ = self.qnetwork_target(next_state_tensor)
+                    q_target_value = q_target_next[0, next_action]
+                else:
+                    q_target_next, _ = self.qnetwork_target(next_state_tensor)
+                    q_target_value = torch.max(q_target_next).item()
+                
+                # Tính target
+                target = reward + (self.gamma * q_target_value * (1 - done))
+                
+                # TD error
+                td_error = abs(q_value.item() - target)
+                
+            # Lưu trữ với ưu tiên
+            self.memory.add(state, action, reward, next_state, done, td_error)
+        else:
+            # Lưu trữ bình thường
+            self.memory.add(state, action, reward, next_state, done)
+        
+        # Cập nhật bước đếm
+        self.t_step = (self.t_step + 1) % self.update_every
         self.total_steps += 1
         
-        # Lưu kinh nghiệm vào replay memory
-        if self.prioritized_replay:
-            # Tính TD error cho ưu tiên ban đầu
-            with torch.no_grad():
-                state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-                next_state_tensor = torch.FloatTensor(next_state).unsqueeze(0).to(self.device)
-                
-                # Tính current Q value
-                q_values, _ = self.qnetwork_local(state_tensor)
-                current_q = q_values[0][0, action].item()
-                
-                # Tính target Q value với double DQN
-                next_q_values, _ = self.qnetwork_local(next_state_tensor)
-                next_action = next_q_values[0].argmax(dim=1).item()
-                next_q_target_values, _ = self.qnetwork_target(next_state_tensor)
-                target_q = next_q_target_values[0][0, next_action].item()
-                
-                # Tính TD target
-                td_target = reward if done else reward + self.gamma * target_q
-                
-                # Tính TD error
-                td_error = td_target - current_q
-                
-                self.memory.push(state, action, reward, next_state, done, td_error)
-        else:
-            self.memory.push(state, action, reward, next_state, done)
+        # Thêm reward vào lịch sử
+        self.rewards_history.append(reward)
         
-        # Học mỗi update_every bước
-        self.t_step = (self.t_step + 1) % self.update_every
-        if self.t_step == 0 and len(self.memory) > self.batch_size and self.total_steps > self.warm_up_steps:
-            if self.prioritized_replay:
-                self._learn_prioritized()
-            else:
-                experiences = self._sample_from_memory()
-                self._learn(experiences)
+        # Tăng beta cho PER (giảm thiên lệch)
+        if self.prioritized_replay:
+            self.beta = min(1.0, self.beta + self.beta_increment)
+        
+        # Học từ batch trải nghiệm
+        if self.t_step == 0 and len(self.memory) > self.batch_size:
+            if self.train_start_time is None:
+                self.train_start_time = time.time()
+                
+            self._learn()
+            
+            # Giảm epsilon (exploration rate)
+            self.epsilon = max(self.epsilon_end, self.epsilon_decay * self.epsilon)
+            
+            # Xóa cache định kỳ
+            if self.total_steps % 1000 == 0:
+                self.clear_cache()
+    
+    def get_performance_stats(self) -> Dict[str, Any]:
+        """
+        Trả về thống kê hiệu suất của agent.
+        
+        Returns:
+            Dict[str, Any]: Thống kê hiệu suất
+        """
+        return {
+            'total_steps': self.total_steps,
+            'avg_recent_loss': np.mean(self.loss_history[-100:]) if self.loss_history else None,
+            'avg_recent_reward': np.mean(self.rewards_history[-100:]) if self.rewards_history else None,
+            'epsilon': self.epsilon,
+            'cache_hits': self.cache_hits,
+            'cache_misses': self.cache_misses,
+            'cache_hit_ratio': self.cache_hits / (self.cache_hits + self.cache_misses) if (self.cache_hits + self.cache_misses) > 0 else 0
+        }
     
     def act(self, state, eps=None):
         """
@@ -202,13 +275,34 @@ class DQNAgent:
         Returns:
             int: Hành động được chọn
         """
+        # Thiết lập epsilon
+        if eps is None:
+            eps = self.epsilon
+        
+        # Kiểm tra cache cho hành động greedy
+        state_hash = None
+        if eps < 0.01:  # Nếu epsilon nhỏ, hầu như luôn greedy
+            if isinstance(state, np.ndarray):
+                state_hash = compute_hash(state.tobytes())
+            
+            # Kiểm tra trong cache
+            if state_hash in self.action_cache:
+                self.cache_hits += 1
+                return self.action_cache[state_hash]
+            
+            self.cache_misses += 1
+        
+        # Chọn hành động ngẫu nhiên với xác suất epsilon
+        if random.random() < eps:
+            return random.choice(np.arange(self.action_size))
+        
         # Chuyển state thành tensor
-        state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+        state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
         
         # Tắt chế độ học cho mạng
         self.qnetwork_local.eval()
         with torch.no_grad():
-            action_values, _ = self.qnetwork_local(state)
+            action_values, _ = self.qnetwork_local(state_tensor)
             
             # Lấy giá trị Q của chiều hành động đầu tiên
             action_values = action_values[0]
@@ -221,14 +315,20 @@ class DQNAgent:
             self.qnetwork_local.reset_noise()
             return np.argmax(action_values.cpu().data.numpy())
         
-        # Epsilon-greedy action selection
-        if eps is None:
-            eps = self.epsilon
+        # Chọn hành động với giá trị Q lớn nhất
+        action = np.argmax(action_values.cpu().data.numpy())
+        
+        # Lưu vào cache nếu greedy
+        if state_hash is not None:
+            self.action_cache[state_hash] = action
             
-        if random.random() > eps:
-            return np.argmax(action_values.cpu().data.numpy())
-        else:
-            return random.choice(np.arange(self.action_size))
+            # Giới hạn kích thước cache
+            if len(self.action_cache) > self.max_cache_size:
+                # Xóa một mục ngẫu nhiên
+                random_key = random.choice(list(self.action_cache.keys()))
+                del self.action_cache[random_key]
+        
+        return action
 
     def _sample_from_memory(self):
         """
@@ -391,7 +491,9 @@ class DQNAgent:
             'training_rewards': self.training_rewards,
             'validation_rewards': self.validation_rewards,
             'epsilon': self.epsilon,
-            'total_steps': self.total_steps
+            'total_steps': self.total_steps,
+            'cache_hits': self.cache_hits,
+            'cache_misses': self.cache_misses
         }, path)
         
         logger.info(f"Mô hình đã được lưu tại: {path}")
@@ -434,6 +536,12 @@ class DQNAgent:
                 
             if 'total_steps' in checkpoint:
                 self.total_steps = checkpoint['total_steps']
+                
+            if 'cache_hits' in checkpoint:
+                self.cache_hits = checkpoint['cache_hits']
+                
+            if 'cache_misses' in checkpoint:
+                self.cache_misses = checkpoint['cache_misses']
                 
             logger.info(f"Đã tải model từ {path}")
             return True

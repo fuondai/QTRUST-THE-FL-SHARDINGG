@@ -1,8 +1,12 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from typing import Dict, List, Tuple, Any, Optional
+from typing import Dict, List, Tuple, Any, Optional, Callable
 import copy
+import logging
+from qtrust.utils.cache import lru_cache, tensor_cache, compute_hash
+
+logger = logging.getLogger("qtrust.federated.aggregation")
 
 class OptimizedAggregator:
     """
