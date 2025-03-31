@@ -83,7 +83,6 @@ results_large/*.txt
 results_comparison/*.txt
 qtrust_results/*.txt
 qtrust_scale_results/*.txt
-*.csv
 *.tmp
 
 # Keep model files
