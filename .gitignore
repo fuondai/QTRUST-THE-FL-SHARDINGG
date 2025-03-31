@@ -40,9 +40,6 @@ results_comparison/
 results_comparison_systems/
 
 # File hình ảnh tạm thời
-*.png
-*.jpg
-*.jpeg
 *.pdf
 !docs/architecture/*.png
 !docs/methodology/*.png
