@@ -61,7 +61,7 @@ QTrust đạt được hiệu năng ấn tượng so với các giải pháp blo
 QTrust được thiết kế theo kiến trúc module, cho phép linh hoạt và dễ dàng mở rộng:
 
 <div align="center">
-  <img src="docs/architecture/qtrust_architecture.png" alt="QTrust Architecture" width="90%">
+  <img src="docs/exported_charts/architecture_diagram.png" alt="QTrust Architecture" width="90%">
 </div>
 
 ### 🧩 Các module chính:
@@ -142,7 +142,7 @@ py -3.10 run_all.py  # Chạy tất cả các bước từ đầu đến cuối
 ```bash
 py -3.10 tests/run_all_tests.py          # Chạy tất cả các test
 py -3.10 run_final_benchmark.py          # Chạy benchmark cuối cùng
-py -3.10 generate_final_charts.py        # Tạo biểu đồ kết quả
+py -3.10 run_visualizations.py           # Tạo biểu đồ kết quả
 py -3.10 agents/train_rainbow_dqn.py     # Huấn luyện agent DQN
 ```
 
@@ -153,7 +153,7 @@ py -3.10 tests/attack_simulation_runner.py --num-shards 32 --nodes-per-shard 24 
 ```
 
 <div align="center">
-  <img src="docs/exported_charts/htdcm_trust_evaluation.png" alt="Trust Evaluation" width="80%">
+  <img src="docs/exported_charts/attack_detection.png" alt="Attack Detection" width="80%">
 </div>
 
 ## 📈 Hiệu quả Caching
@@ -162,6 +162,25 @@ QTrust sử dụng chiến lược caching thông minh để tối ưu hóa hi�
 
 <div align="center">
   <img src="docs/exported_charts/caching_performance.png" alt="Caching Performance" width="80%">
+</div>
+
+## 💻 Federated Learning
+
+QTrust sử dụng federated learning để huấn luyện mô hình phân tán bảo vệ quyền riêng tư:
+
+<div align="center">
+  <img src="docs/exported_charts/federated_learning_convergence.png" alt="Federated Learning Convergence" width="80%">
+</div>
+
+<div align="center">
+  <img src="docs/exported_charts/privacy_comparison.png" alt="Privacy Comparison" width="80%">
+</div>
+
+## 🚄 Hiệu năng và Chi phí Giao tiếp
+
+<div align="center">
+  <img src="docs/exported_charts/communication_cost.png" alt="Communication Cost" width="80%">
+  <img src="docs/exported_charts/latency_chart.png" alt="Latency Chart" width="80%">
 </div>
 
 ## 📚 Tài liệu
