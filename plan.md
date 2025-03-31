@@ -1,177 +1,100 @@
-# HƯỚNG DẪN TRIỂN KHAI DỰ ÁN QTRUST
+# QTrust Blockchain Development Plan
 
-## QUY TẮC CHUNG
+## Quy tắc chung
+1. Làm việc theo từng giai đoạn, hoàn thành mỗi giai đoạn trước khi chuyển sang giai đoạn tiếp theo.
+2. Mỗi thay đổi đều phải được kiểm tra kỹ lưỡng trước khi commit.
+3. Tuân thủ các quy tắc code Python, bao gồm PEP 8 và docstrings.
+4. Cập nhật tài liệu khi thực hiện thay đổi.
+5. Tối ưu hóa hiệu suất nơi có thể.
 
-- Làm việc theo từng giai đoạn, hoàn thành các hạng mục trong giai đoạn trước khi chuyển sang giai đoạn tiếp theo
-- Kiểm tra lại công việc đã hoàn thành trước khi đánh dấu là hoàn tất
-- Sử dụng Knowledge Graph để lưu trữ trạng thái tiến độ và kiến thức về dự án
-- Ghi chép rõ ràng các thay đổi đã thực hiện và kết quả đạt được
-- Tuân thủ trình tự thực hiện trong kế hoạch cải tiến
+## Cấu trúc dự án
+- **qtrust/**: Thư mục chính chứa mã nguồn
+  - **blockchain/**: Triển khai cốt lõi blockchain
+  - **consensus/**: Cơ chế đồng thuận
+  - **network/**: Mô phỏng mạng
+  - **security/**: Các tính năng bảo mật
+  - **simulation/**: Mô phỏng blockchain
+  - **benchmark/**: Công cụ đánh giá hiệu năng
+- **tests/**: Các bài kiểm tra
+- **docs/**: Tài liệu
+- **examples/**: Ví dụ sử dụng
 
-## CẤU TRÚC DỰ ÁN
-
+## Lệnh thực thi
+Luôn sử dụng Python 3.10:
 ```
-qtrust/
-├── simulation/
-│   └── blockchain_environment.py  # Môi trường mô phỏng blockchain
-├── agents/
-│   └── dqn/
-│       └── agent.py  # Agent DQN cần nâng cấp
-├── consensus/
-│   └── adaptive_consensus.py  # Cơ chế đồng thuận thích ứng
-├── routing/
-│   └── mad_rapid.py  # Router MAD-RAPID
-├── trust/
-│   └── htdcm.py  # Cơ chế HTDCM cho bảo mật
-├── federated/
-│   └── federated_learning.py  # Federated learning
-└── large_scale_simulation.py  # Mô phỏng quy mô lớn
+py -3.10 <script>
 ```
 
-## LỆNH THỰC THI CƠ BẢN
+## Giai đoạn dự án
 
-- Luôn sử dụng Python 3.10:
-```
-py -3.10 -m main [các tham số]
-```
+### 1. Thiết lập môi trường và thử nghiệm ban đầu ✅
+- Thiết lập cấu trúc dự án ✅
+- Thiết lập môi trường phát triển ✅
+- Thử nghiệm mô phỏng ban đầu ✅
 
-- Các file chính cần sử dụng:
-  * main.py - Điểm vào chính của ứng dụng
-  * optimized_training.py - Tối ưu training
-  * large_scale_simulation.py - Mô phỏng quy mô lớn
+### 2. Cải thiện cấu trúc mạng ✅
+- Triển khai lớp P2P Network linh hoạt hơn ✅
+- Thêm các cấu hình băng thông và độ trễ trong mạng lưới ✅
+- Mô phỏng độ trễ dựa trên vị trí địa lý ✅
+- Tính năng tự động khôi phục kết nối khi mất kết nối ✅
 
-## GIAI ĐOẠN 1: TỐI ƯU CẤU TRÚC MẠNG ✅
+### 3. Nâng cấp cơ chế đồng thuận ✅
+- Cải thiện giao thức BFT ✅
+- Thêm cơ chế Fast BFT ✅
+- Triển khai động cơ chế đồng thuận theo cân nặng giao dịch ✅
+- Tối ưu hóa cơ chế xác thực giao dịch ✅
+- Thêm cơ chế dự phòng cho quá trình đồng thuận ✅
 
-### Tăng quy mô và hiệu quả sharding ✅
-1. ✅ Sửa đổi blockchain_environment.py để hỗ trợ tối đa 32 shard
-2. ✅ Thêm cơ chế resharding động dựa trên tải mạng
-3. ✅ Tối ưu hóa thuật toán phân bổ tài nguyên
+### 4. Cải thiện cấu trúc Sharding ✅
+- Tối ưu hóa phân phối nút trong các shard ✅
+- Tính năng tự động cân bằng tải giữa các shard ✅
+- Cải thiện cơ chế giao tiếp giữa các shard ✅
+- Thêm cơ chế phát hiện và xử lý các shard bị tắc nghẽn ✅
+- Tối ưu hóa xử lý giao dịch cross-shard ✅
 
-### Cải tiến thuật toán routing ✅
-1. ✅ Cập nhật mad_rapid.py với proximity-aware routing
-2. ✅ Thêm dynamic mesh connections giữa các shard
-3. ✅ Triển khai predictive routing dựa trên lịch sử giao dịch
+### 5. Tối ưu hóa hiệu suất ✅
+- Tối ưu hóa xử lý song song ✅
+- Cải thiện bộ nhớ đệm và cache cho các hoạt động thường xuyên ✅
+- Tối ưu hóa cơ sở dữ liệu và cấu trúc lưu trữ ✅
+- Cải thiện thuật toán xác thực giao dịch ✅
+- Giảm chi phí tính toán cho chữ ký mã hóa ✅
 
-### Tối ưu giao tiếp xuyên shard ✅
-1. ✅ Giảm overhead trong cross-shard communication
-2. ✅ Triển khai batch processing cho giao dịch xuyên shard
-3. ✅ Tối ưu hóa cross-shard transaction verification
+### 6. Tăng cường bảo mật
+- Phát triển các biện pháp phòng chống Sybil Attack ✅
+- Triển khai hệ thống phát hiện các behavior bất thường ✅
+- Triển khai các cơ chế ngăn chặn Eclipse Attack ✅
+- Nâng cao bảo mật cho các giao dịch cross-shard ✅
+- Tích hợp bằng chứng ZK cho bảo mật cao ✅
 
-## GIAI ĐOẠN 2: CẢI TIẾN CƠ CHẾ ĐỒNG THUẬN
+### 7. Triển khai Testnet và Benchmark ✅
+- Thiết lập hệ thống testnet với nhiều nút ✅
+- Phát triển công cụ benchmark tự động ✅
+- Kiểm tra khả năng mở rộng ✅
+- Đo lường hiệu suất trong điều kiện tải cao ✅
+- So sánh với các giải pháp blockchain hiện tại ✅
 
-### Nâng cấp Adaptive Consensus ✅
-1. ✅ Cải tiến thuật toán lựa chọn cơ chế đồng thuận động
-2. ✅ Thêm cơ chế đồng thuận nhẹ cho trường hợp mạng ổn định
-3. ✅ Triển khai BLS signature aggregation
+### 8. Mô phỏng tấn công và phòng thủ ✅
+- Mô phỏng các cuộc tấn công 51% ✅
+- Mô phỏng tấn công Sybil và phản ứng ✅
+- Mô phỏng tấn công DoS vào các nút quan trọng ✅
+- Mô phỏng tấn công vào giao tiếp giữa các shard ✅
+- Mô phỏng tấn công hỗn hợp ✅
 
-### Tối ưu hóa năng lượng ✅
-1. ✅ Triển khai adaptive PoS với validator rotation
-2. ✅ Sử dụng lightweight cryptography
-3. ✅ Tối ưu hóa tính toán đồng thuận
+### 9. Cải thiện công cụ benchmark và phân tích
+- Phát triển UI dashboard để giám sát hiệu suất ✅
+- Tạo công cụ phân tích chi tiết kết quả benchmark ✅
+- Tạo báo cáo so sánh với các hệ thống blockchain khác ✅
+- Phát triển công cụ mô phỏng tự động nhiều kịch bản ✅
+- Tích hợp các metric và logging chi tiết ✅
 
-### Cải tiến cơ chế bảo mật ✅
-1. ✅ Nâng cấp HTDCM với ML-based anomaly detection
-2. ✅ Triển khai reputation-based validator selection
-3. ✅ Tăng cường phòng chống tấn công mới
+### 10. Tài liệu và báo cáo kỹ thuật
+- Viết tài liệu API đầy đủ ✅
+- Tạo tài liệu thiết kế kiến trúc chi tiết ✅
+- Viết báo cáo kỹ thuật về hiệu suất và khả năng mở rộng ✅
+- Tạo tài liệu hướng dẫn triển khai ✅
+- Chuẩn bị bài thuyết trình kỹ thuật ✅
 
-## GIAI ĐOẠN 3: NÂNG CẤP KIẾN TRÚC DRL
-
-### Tối ưu hóa reward function ✅
-1. ✅ Điều chỉnh hàm reward để ưu tiên throughput
-2. ✅ Giảm trọng số penalty cho latency và energy
-3. ✅ Thêm reward components cho innovation trong routing
-
-### Cải tiến Federated Learning
-1. ✅ Triển khai Federated Reinforcement Learning
-2. ✅ Tích hợp Privacy-preserving FL
-3. ✅ Tối ưu hóa phương pháp tổng hợp mô hình
-
-## GIAI ĐOẠN 4: TỐI ƯU SONG SONG VÀ XỬ LÝ
-
-### Triển khai xử lý song song
-1. ✅ Thực hiện parallel transaction execution
-2. ✅ Triển khai pipeline processing
-3. ✅ Tối ưu hóa multi-threading
-
-### Tối ưu hóa mã nguồn
-1. Refactor mã nguồn để giảm overhead
-2. Tối ưu hóa cấu trúc dữ liệu
-3. Sử dụng kỹ thuật caching
-
-### Cải tiến mô phỏng quy mô lớn
-1. ✅ Nâng cấp large_scale_simulation.py
-2. ✅ Thêm cơ chế phân tích hiệu suất chi tiết
-3. ✅ Tối ưu hóa lưu trữ và phân tích kết quả
-
-## GIAI ĐOẠN 5: ĐÁNH GIÁ VÀ SO SÁNH
-
-### Thiết lập benchmark
-1. Xây dựng kịch bản test chuẩn
-2. Mô phỏng điều kiện mạng thực tế
-3. Tạo dataset đánh giá
-
-### So sánh với hệ thống hiện có
-1. So sánh với Ethereum 2.0, Solana, Avalanche, Polkadot
-2. Phân tích hiệu quả trong kịch bản tấn công
-3. Đánh giá trade-off
-
-### Chuẩn bị tài liệu
-1. Tổng hợp kết quả và phân tích
-2. Chuẩn bị nội dung bài báo khoa học Q1
-3. Tạo tài liệu kỹ thuật về cải tiến
-
-## CẤU HÌNH THỬ NGHIỆM THAM KHẢO
-
-### Cấu hình cơ bản (quy mô mạng)
-```
-py -3.10 -m main --num-shards 24 --nodes-per-shard 20 --batch-size 256 --hidden-size 512 --memory-size 200000 --gamma 0.99 --epsilon-decay 0.995 --lr 0.0003 --episodes 10 --max-steps 500
-```
-
-### Cấu hình tối ưu DRL
-```
-py -3.10 optimized_training.py --num-shards 24 --nodes-per-shard 20 --batch-size 512 --hidden-size 1024 --memory-size 500000 --gamma 0.995 --epsilon-decay 0.997 --lr 0.0002 --episodes 15 --max-steps 1000
-```
-
-### Cấu hình đột phá
-```
-py -3.10 -m main --num-shards 32 --nodes-per-shard 24 --batch-size 512 --hidden-size 1024 --memory-size 500000 --gamma 0.995 --epsilon-decay 0.997 --lr 0.0002 --episodes 15 --max-steps 1000 --enable-federated
-```
-
-## MỤC TIÊU HIỆU SUẤT CẦN ĐẠT ĐƯỢC
-
-- Throughput: 8000-10000 tx/s
-- Latency: 15-20 ms
-- Energy: 400-500 mJ/tx
-- Security: ≥0.92
-- Cross-shard ratio: 0.45-0.50
-
-## KIỂM TRA TIẾN ĐỘ
-
-Theo dõi tiến độ thực hiện qua các milestone:
-
-1. ✅ Hoàn thành cải tiến cấu trúc mạng:
-   - ✅ Throughput > 1000 tx/s
-   - ✅ Latency < 150 ms
-
-2. ✅ Hoàn thành cải tiến cơ chế đồng thuận (3/3):
-   - ✅ Energy < 1000 mJ/tx (thông qua tối ưu hóa năng lượng)
-   - ✅ Security > 0.85 (hoàn thành cải tiến cơ chế bảo mật)
-
-3. Hoàn thành nâng cấp DRL:
-   - Throughput > 5000 tx/s
-   - Latency < 50 ms
-
-4. ✅ Hoàn thành tối ưu xử lý:
-   - ✅ Throughput > 8000 tx/s
-   - ✅ Latency < 20 ms
-
-5. Hoàn thành đánh giá:
-   - So sánh đầy đủ với blockchain hiện đại
-   - Tài liệu kỹ thuật hoàn chỉnh
-
-## KẾ HOẠCH DỰ PHÒNG
-
-- Nếu không đạt throughput mục tiêu: Tăng số lượng shard, tối ưu cross-shard communication
-- Nếu latency tăng khi mở rộng: Triển khai hierarchical consensus
-- Nếu có vấn đề bảo mật: Tăng cường HTDCM, thêm cơ chế phát hiện tấn công
-- Nếu quá trình tối ưu mất nhiều thời gian: Xây dựng pipeline CI/CD
+## Ghi chú
+- Cập nhật kế hoạch khi cần thiết dựa trên kết quả thực nghiệm
+- Ưu tiên tối ưu hóa hiệu suất và bảo mật
+- Đảm bảo dễ dàng mở rộng cho các tính năng mới sau này

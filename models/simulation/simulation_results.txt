@@ -1,0 +1,8 @@
+=== KẾT QUẢ MÔ PHỎNG Q-TRUST ===
+Số shards: 4
+Số nodes/shard: 6
+Số episodes: 2
+
+Reward trung bình: 861.51 ± 406.24
+Throughput trung bình: 7.00 tx/s ± 0.20
+Latency trung bình: 107.69 ms ± 2.65

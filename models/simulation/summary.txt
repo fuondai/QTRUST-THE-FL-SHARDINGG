@@ -1,0 +1,7 @@
+=== KẾT QUẢ TỔNG KẾT ===
+Reward trung bình: 2026.92 ± 0.00
+Throughput trung bình: 8.20 tx/s ± 0.00
+Latency trung bình: 94.58 ms ± 0.00
+Energy trung bình: 34.56 mJ/tx ± 0.00
+Security trung bình: 0.79 ± 0.00
+Cross-shard ratio: 0.15 ± 0.00

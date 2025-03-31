@@ -31,14 +31,23 @@ venv.bak/
 .env
 .env.local
 
-# Project specific
-models/
+# File kết quả tạm thời
+benchmark_results/
+energy_results/
 logs/
+results/
 results_comparison/
+results_comparison_systems/
+
+# File hình ảnh tạm thời
 *.png
 *.jpg
 *.jpeg
 *.pdf
+!docs/architecture/*.png
+!docs/methodology/*.png
+!docs/methodology/*.jpg
+!docs/methodology/*.pdf
 
 # Testing
 .pytest_cache/
@@ -96,6 +105,12 @@ docker-compose.override.yml
 *.bak
 *.temp
 tmp/
+
+# Exclude cleaned_results
+# Vẫn giữ lại thư mục cleaned_results để lưu trữ kết quả cuối cùng
+!cleaned_results/
+!cleaned_results/*.csv
+!cleaned_results/*.json
 
 # Generated charts
 charts/*.png

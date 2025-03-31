@@ -1,0 +1,10 @@
+Tổng kết
+-----------------
+Python: 89 files, 33744 dòng
+JSON: 22 files, 6324 dòng
+Markdown: 9 files, 1145 dòng
+Text: 4 files
+YAML: 1 file
+-----------------
+Tổng số file code: 125 files
+Tổng số dòng code chính: 41213+ dòng
