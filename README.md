@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![QTrust Logo](docs/exported_charts/system_overview.png)
+![QTrust Logo](docs/exported_charts/logo.jpeg)
 
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-1.10%2B-red.svg)](https://pytorch.org/)
@@ -195,9 +195,7 @@ Dự án này được cấp phép theo [MIT License](LICENSE).
 
 ## 📞 Liên hệ
 
-- **Email**: qtrust@example.com
-- **Website**: https://qtrust.example.com
-- **Twitter**: [@QTrustBlockchain](https://twitter.com/QTrustBlockchain)
+- **Email**: daibp.infosec@gmail.com
 
 ---
 
